@@ -179,5 +179,3 @@ A GitHub Actions workflow (`.github/workflows/ci.yml`) runs the suite plus a `ru
 ## License
 
 MIT (or your choice — add a `LICENSE` file).
-#   L e a d _ A g e n t i c _ A I  
- 

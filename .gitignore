@@ -1,0 +1,99 @@
+# ─── DATABASE ──────────────────────────────────────────────────────────
+# WHAT: The SQLite database file (created automatically by db.py).
+# WHY: Never commit the database to Git — it contains lead data (names, contacts, etc.)
+#      and will be different on every machine/deployment.
+leads.db
+leads.db-journal
+
+# ─── ENVIRONMENT VARIABLES ───────────────────────────────────────────
+# WHAT: Your .env file with API keys and secrets.
+# WHY: Never commit API keys, webhook URLs, or other secrets to Git.
+.env
+.env.local
+.env.*.local
+
+# ─── PYTHON COMPILED FILES ───────────────────────────────────────────
+# WHAT: Python bytecode cache files.
+# WHY: These are auto-generated and not needed in version control.
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyc
+
+# ─── PYTHON DISTRIBUTION / BUILD ─────────────────────────────────────
+# WHAT: Build artifacts when packaging the project.
+# WHY: These are generated, not source code.
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+
+# ─── VIRTUAL ENVIRONMENTS ────────────────────────────────────────────
+# WHAT: Python virtual environment folders.
+# WHY: These are large, machine-specific, and not needed in Git.
+venv/
+env/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# ─── IDE CONFIGURATION ───────────────────────────────────────────────
+# WHAT: IDE-specific settings and project files.
+# WHY: These are personal preference and should not be shared.
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.project
+.classpath
+.settings/
+
+# ─── TESTING / COVERAGE ──────────────────────────────────────────────
+# WHAT: Test artifacts and coverage reports.
+# WHY: These are generated during testing, not source code.
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# ─── LOGS ─────────────────────────────────────────────────────────────
+# WHAT: Application log files.
+# WHY: Logs are generated at runtime and contain machine-specific data.
+*.log
+logs/
+
+# ─── TEMPORARY FILES ──────────────────────────────────────────────────
+# WHAT: OS and editor temporary files.
+# WHY: These are not part of the project.
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# ─── DEPLOYMENT ──────────────────────────────────────────────────────
+# WHAT: Deployment-specific files (Railway, Heroku, etc.)
+# WHY: These are generated during deployment, not part of source code.
+railway.json
+.railway/
+
+# ─── SECURITY ────────────────────────────────────────────────────────
+# WHAT: Security-sensitive files.
+# WHY: Never commit private keys or credential files.
+*.key
+*.pem
+*.crt
+*.p12
+
+# ─── MISC ─────────────────────────────────────────────────────────────
+# WHAT: OS-specific junk files.
+# WHY: Not part of the project.
+Thumbs.db
+desktop.ini
+.DS_Store

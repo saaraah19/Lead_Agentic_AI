@@ -1,0 +1,12 @@
+.env
+.env.*
+leads.db
+leads.db-journal
+__pycache__/
+*.pyc
+.git/
+.gitignore
+venv/
+.venv/
+*.md
+.pytest_cache/

@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lead Agent AI — Qualify leads in any language, instantly</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --navy:    #080D1A;
+      --navy-2:  #0E1628;
+      --navy-3:  #151F38;
+      --blue:    #00C2FF;
+      --blue-dim:#0096CC;
+      --amber:   #F59E0B;
+      --hot:     #FF4D4D;
+      --warm:    #F59E0B;
+      --cold:    #60A5FA;
+      --white:   #F0F6FF;
+      --gray:    #6B7FA3;
+      --border:  rgba(0,194,255,0.12);
+      --card-bg: rgba(14,22,40,0.85);
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--navy);
+      color: var(--white);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── BACKGROUND GRID ── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(0,194,255,0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,194,255,0.04) 1px, transparent 1px);
+      background-size: 48px 48px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── GLOW ORBS ── */
+    .orb {
+      position: fixed;
+      border-radius: 50%;
+      filter: blur(90px);
+      pointer-events: none;
+      z-index: 0;
+      opacity: 0.35;
+    }
+    .orb-1 { width: 500px; height: 500px; background: #00408C; top: -120px; right: -80px; }
+    .orb-2 { width: 380px; height: 380px; background: #1A0A40; bottom: 60px; left: -100px; }
+
+    /* ── NAV ── */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 18px 40px;
+      backdrop-filter: blur(12px);
+      background: rgba(8,13,26,0.7);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-logo {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      color: var(--white);
+    }
+    .nav-logo span { color: var(--blue); }
+    .nav-links { display: flex; align-items: center; gap: 28px; }
+    .nav-links a {
+      font-size: 0.85rem;
+      color: var(--gray);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover { color: var(--white); }
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 10px 22px;
+      border-radius: 8px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.9rem;
+      font-weight: 600;
+      text-decoration: none;
+      cursor: pointer;
+      transition: all 0.2s;
+      border: none;
+    }
+    .btn-primary {
+      background: var(--blue);
+      color: var(--navy);
+    }
+    .btn-primary:hover { background: #33CFFF; transform: translateY(-1px); box-shadow: 0 6px 24px rgba(0,194,255,0.35); }
+    .btn-ghost {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--gray);
+    }
+    .btn-ghost:hover { border-color: var(--blue); color: var(--blue); }
+
+    /* ── SECTIONS ── */
+    section { position: relative; z-index: 1; }
+
+    /* ── HERO ── */
+    .hero {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      padding: 120px 40px 80px;
+      gap: 64px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    .hero-text { flex: 1; max-width: 560px; }
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 14px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(0,194,255,0.06);
+      font-size: 0.78rem;
+      font-weight: 500;
+      color: var(--blue);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      margin-bottom: 28px;
+    }
+    .eyebrow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--blue); animation: pulse 2s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.4;transform:scale(0.8)} }
+
+    h1 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: clamp(2.4rem, 4.5vw, 3.6rem);
+      font-weight: 700;
+      line-height: 1.08;
+      letter-spacing: -0.03em;
+      margin-bottom: 24px;
+    }
+    h1 em { font-style: normal; color: var(--blue); }
+    .hero-sub {
+      font-size: 1.05rem;
+      color: var(--gray);
+      line-height: 1.65;
+      margin-bottom: 40px;
+      max-width: 440px;
+    }
+    .hero-ctas { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+    .stat-row {
+      display: flex; gap: 32px; margin-top: 56px;
+      border-top: 1px solid var(--border);
+      padding-top: 32px;
+    }
+    .stat { display: flex; flex-direction: column; gap: 4px; }
+    .stat-num {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: var(--white);
+    }
+    .stat-num span { color: var(--blue); }
+    .stat-label { font-size: 0.78rem; color: var(--gray); }
+
+    /* ── MOCK CHAT WINDOW ── */
+    .hero-demo { flex: 1; max-width: 460px; }
+    .chat-window {
+      background: var(--navy-2);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,194,255,0.08);
+    }
+    .chat-topbar {
+      background: var(--navy-3);
+      padding: 14px 18px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .chat-dots { display: flex; gap: 6px; }
+    .chat-dots span { width: 10px; height: 10px; border-radius: 50%; }
+    .chat-dots span:nth-child(1) { background: #FF5F57; }
+    .chat-dots span:nth-child(2) { background: #FFBD2E; }
+    .chat-dots span:nth-child(3) { background: #28C840; }
+    .chat-topbar-title {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--gray);
+      margin-left: 6px;
+    }
+    .chat-online { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 0.75rem; color: #34D399; }
+    .chat-online::before { content:''; width:6px; height:6px; border-radius:50%; background:#34D399; }
+
+    .chat-body {
+      padding: 20px;
+      min-height: 340px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      font-size: 0.88rem;
+    }
+    .msg { display: flex; flex-direction: column; max-width: 82%; animation: fadeUp 0.4s ease both; }
+    @keyframes fadeUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+    .msg.bot { align-self: flex-start; }
+    .msg.user { align-self: flex-end; }
+    .msg-bubble {
+      padding: 10px 14px;
+      border-radius: 12px;
+      line-height: 1.5;
+    }
+    .bot .msg-bubble {
+      background: var(--navy-3);
+      color: var(--white);
+      border-bottom-left-radius: 4px;
+    }
+    .user .msg-bubble {
+      background: var(--blue);
+      color: var(--navy);
+      font-weight: 500;
+      border-bottom-right-radius: 4px;
+    }
+    .msg-time { font-size: 0.68rem; color: var(--gray); margin-top: 4px; }
+    .bot .msg-time { align-self: flex-start; }
+    .user .msg-time { align-self: flex-end; }
+    .score-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      font-family: 'Space Grotesk', sans-serif;
+      letter-spacing: 0.05em;
+      margin-top: 4px;
+    }
+    .score-hot { background: rgba(255,77,77,0.15); color: var(--hot); border: 1px solid rgba(255,77,77,0.3); }
+    .score-warm { background: rgba(245,158,11,0.15); color: var(--warm); border: 1px solid rgba(245,158,11,0.3); }
+    .score-cold { background: rgba(96,165,250,0.15); color: var(--cold); border: 1px solid rgba(96,165,250,0.3); }
+
+    .lang-toggle {
+      display: flex; gap: 8px; padding: 14px 20px;
+      border-top: 1px solid var(--border);
+      background: var(--navy-3);
+    }
+    .lang-btn {
+      padding: 5px 12px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--gray);
+      font-family: 'Space Grotesk', sans-serif;
+      transition: all 0.2s;
+    }
+    .lang-btn.active { background: var(--blue); border-color: var(--blue); color: var(--navy); }
+    .lang-btn:hover:not(.active) { border-color: var(--blue); color: var(--blue); }
+
+    /* ── FEATURES ── */
+    .features { padding: 80px 40px; max-width: 1200px; margin: 0 auto; }
+    .section-label {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--blue);
+      margin-bottom: 14px;
+    }
+    h2 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: clamp(1.8rem, 3vw, 2.6rem);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 48px;
+    }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px;
+      transition: border-color 0.25s, transform 0.25s;
+    }
+    .card:hover { border-color: rgba(0,194,255,0.3); transform: translateY(-3px); }
+    .card-icon {
+      width: 44px; height: 44px;
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.3rem;
+      margin-bottom: 18px;
+    }
+    .card h3 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin-bottom: 10px;
+    }
+    .card p { font-size: 0.88rem; color: var(--gray); line-height: 1.65; }
+
+    /* ── HOW IT WORKS ── */
+    .how {
+      padding: 80px 40px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 24px;
+      margin-top: 48px;
+    }
+    .step {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      position: relative;
+    }
+    .step:not(:last-child)::after {
+      content: '→';
+      position: absolute;
+      right: -16px;
+      top: 8px;
+      color: var(--border);
+      font-size: 1.2rem;
+    }
+    .step-num {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--blue);
+      letter-spacing: 0.1em;
+    }
+    .step h4 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 1rem;
+      font-weight: 600;
+    }
+    .step p { font-size: 0.85rem; color: var(--gray); line-height: 1.6; }
+
+    /* ── TECH STACK ── */
+    .stack {
+      padding: 60px 40px;
+      max-width: 1200px;
+      margin: 0 auto;
+      border-top: 1px solid var(--border);
+    }
+    .stack-label { font-size: 0.78rem; color: var(--gray); margin-bottom: 20px; text-align: center; }
+    .badges {
+      display: flex; flex-wrap: wrap; justify-content: center; gap: 10px;
+    }
+    .badge {
+      padding: 7px 16px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      font-size: 0.8rem;
+      color: var(--gray);
+      font-family: 'Space Grotesk', sans-serif;
+      font-weight: 500;
+    }
+
+    /* ── FOOTER ── */
+    footer {
+      text-align: center;
+      padding: 40px 20px;
+      border-top: 1px solid var(--border);
+      font-size: 0.82rem;
+      color: var(--gray);
+    }
+    footer a { color: var(--blue); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+
+    /* ── RTL SUPPORT FOR ARABIC BUBBLE ── */
+    .rtl-bubble { direction: rtl; text-align: right; }
+
+    @media (max-width: 820px) {
+      nav { padding: 16px 20px; }
+      .hero { flex-direction: column; padding: 100px 20px 60px; gap: 40px; }
+      .hero-text, .hero-demo { max-width: 100%; }
+      .step:not(:last-child)::after { display: none; }
+      .features, .how, .stack { padding: 60px 20px; }
+      .stat-row { gap: 20px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+
+  <!-- ── NAV ── -->
+  <nav>
+    <div class="nav-logo">Lead<span>Agent</span> AI</div>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#how">How it works</a>
+      <a href="/docs">API Docs</a>
+      <a href="/widget" class="btn btn-primary">Try the demo →</a>
+    </div>
+  </nav>
+
+  <!-- ── HERO ── -->
+  <section>
+    <div class="hero">
+      <div class="hero-text">
+        <div class="eyebrow"><span class="dot"></span>Live on Render — try it now</div>
+        <h1>Your website's first<br /><em>salesperson</em>.<br />In any language.</h1>
+        <p class="hero-sub">
+          Lead Agent AI sits on your site 24/7, qualifies visitors in English, French, or Arabic, scores them hot/warm/cold in real time, and pings you on Slack when a real opportunity walks through the door.
+        </p>
+        <div class="hero-ctas">
+          <a href="/widget" class="btn btn-primary">Start a conversation →</a>
+          <a href="/docs" class="btn btn-ghost">View API docs</a>
+        </div>
+        <div class="stat-row">
+          <div class="stat">
+            <div class="stat-num">7<span>×</span></div>
+            <div class="stat-label">more likely to convert a lead<br />responded to within 1 hour</div>
+          </div>
+          <div class="stat">
+            <div class="stat-num">3</div>
+            <div class="stat-label">languages — Arabic,<br />French, English</div>
+          </div>
+          <div class="stat">
+            <div class="stat-num">&lt;2<span>s</span></div>
+            <div class="stat-label">response time,<br />any hour of the day</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── MOCK CHAT ── -->
+      <div class="hero-demo">
+        <div class="chat-window">
+          <div class="chat-topbar">
+            <div class="chat-dots">
+              <span></span><span></span><span></span>
+            </div>
+            <div class="chat-topbar-title">Lead Agent AI</div>
+            <div class="chat-online">Online</div>
+          </div>
+
+          <div class="chat-body" id="chatBody">
+            <!-- Populated by JS -->
+          </div>
+
+          <div class="lang-toggle">
+            <button class="lang-btn active" onclick="showConvo('en')">🇬🇧 English</button>
+            <button class="lang-btn" onclick="showConvo('fr')">🇫🇷 Français</button>
+            <button class="lang-btn" onclick="showConvo('ar')">🇩🇿 العربية</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── FEATURES ── -->
+  <section id="features">
+    <div class="features">
+      <div class="section-label">What it does</div>
+      <h2>Everything a sales rep does.<br />None of the delays.</h2>
+      <div class="cards">
+        <div class="card">
+          <div class="card-icon" style="background:rgba(0,194,255,0.1);">🌐</div>
+          <h3>Detects language instantly</h3>
+          <p>The first message determines the language — Arabic, French, or English — and the entire conversation stays in that language. No settings, no language selection screen.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon" style="background:rgba(245,158,11,0.1);">🎯</div>
+          <h3>Structured qualification</h3>
+          <p>Asks four questions every salesperson needs: what they need, their budget, their timeline, and how to reach them. Adapts follow-ups based on what's already been said.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon" style="background:rgba(255,77,77,0.1);">🔥</div>
+          <h3>Hot / Warm / Cold scoring</h3>
+          <p>Transparent, code-based rules — not an AI self-report. Budget ≥ $1,000 and timeline ≤ 4 weeks = hot. The thresholds are tunable per client in five seconds.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon" style="background:rgba(52,211,153,0.1);">⚡</div>
+          <h3>Instant Slack alerts</h3>
+          <p>Hot leads trigger an immediate Slack notification with the full profile. Every lead, regardless of score, is logged to Notion as a permanent CRM record.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon" style="background:rgba(139,92,246,0.1);">📅</div>
+          <h3>Built-in booking</h3>
+          <p>Hot and warm leads are offered available slots on the spot. No calendar API, no OAuth setup — just "pick a time" done cleanly and stored in the database.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon" style="background:rgba(0,194,255,0.1);">📤</div>
+          <h3>CSV export</h3>
+          <p>Every lead is exportable as a structured CSV — contact info, need, budget, timeline, score, timestamp. Drops straight into any CRM or spreadsheet.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── HOW IT WORKS ── -->
+  <section id="how">
+    <div class="how">
+      <div class="section-label">The flow</div>
+      <h2>A conversation with a purpose<br />at every stage.</h2>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">01</div>
+          <h4>Greet</h4>
+          <p>Detects the visitor's language from their first message and opens in kind.</p>
+        </div>
+        <div class="step">
+          <div class="step-num">02</div>
+          <h4>Qualify</h4>
+          <p>Collects need, budget, timeline, and contact — one at a time, conversationally.</p>
+        </div>
+        <div class="step">
+          <div class="step-num">03</div>
+          <h4>Score</h4>
+          <p>Scores the lead hot/warm/cold using explicit rules. Sends a Slack alert if hot.</p>
+        </div>
+        <div class="step">
+          <div class="step-num">04</div>
+          <h4>Book</h4>
+          <p>Offers available slots to high-scoring leads. Confirms and saves the booking.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── STACK ── -->
+  <section>
+    <div class="stack">
+      <p class="stack-label">Built with</p>
+      <div class="badges">
+        <span class="badge">FastAPI</span>
+        <span class="badge">Google Gemini 2.5 Flash</span>
+        <span class="badge">Pydantic v2</span>
+        <span class="badge">SQLite</span>
+        <span class="badge">Slack Webhooks</span>
+        <span class="badge">Notion API</span>
+        <span class="badge">Docker</span>
+        <span class="badge">Python 3.12</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── FOOTER ── -->
+  <footer>
+    <p>
+      <a href="/widget">Open demo chat</a> · 
+      <a href="/docs">API reference</a> · 
+      <a href="/leads/export">Export leads</a>
+    </p>
+    <p style="margin-top:10px;">Built by Sarah · AI Automation Engineer · Oran, Algeria</p>
+  </footer>
+
+  <script>
+    const convos = {
+      en: [
+        { role: 'bot',  text: "Hi! 👋 I'm here to help connect you with the right service. What are you looking to get done?" },
+        { role: 'user', text: "I need a website built for my restaurant." },
+        { role: 'bot',  text: "Great! What's your rough budget range for this project?" },
+        { role: 'user', text: "Around $3,000." },
+        { role: 'bot',  text: "Perfect. How soon are you looking to launch?" },
+        { role: 'user', text: "Within 2 weeks if possible." },
+        { role: 'bot',  text: "I have everything I need! Can I grab your email or phone number to follow up?", score: null },
+        { role: 'user', text: "sarah@example.com" },
+        { role: 'bot',  text: "Thanks! I've scored this as:", score: 'hot', scoreLabel: '🔥 HOT LEAD' },
+      ],
+      fr: [
+        { role: 'bot',  text: "Bonjour ! 👋 Comment puis-je vous aider aujourd'hui ?" },
+        { role: 'user', text: "Je cherche quelqu'un pour automatiser mes emails." },
+        { role: 'bot',  text: "Super ! Quel est votre budget approximatif ?" },
+        { role: 'user', text: "Environ 500 euros." },
+        { role: 'bot',  text: "D'accord. Vous souhaitez démarrer quand ?" },
+        { role: 'user', text: "Dans 6 semaines, pas pressé." },
+        { role: 'bot',  text: "Merci ! Votre email ou téléphone ?" },
+        { role: 'user', text: "contact@monentreprise.fr" },
+        { role: 'bot',  text: "Parfait, j'ai évalué votre demande comme :", score: 'warm', scoreLabel: '🌡️ WARM LEAD' },
+      ],
+      ar: [
+        { role: 'bot',  text: "مرحباً! 👋 كيف يمكنني مساعدتك اليوم؟", rtl: true },
+        { role: 'user', text: "أريد تطبيق جوال لمتجري.", rtl: true },
+        { role: 'bot',  text: "رائع! ما هو ميزانيتك التقريبية لهذا المشروع؟", rtl: true },
+        { role: 'user', text: "نصف مليون دينار جزائري.", rtl: true },
+        { role: 'bot',  text: "ممتاز. متى تريد البدء؟", rtl: true },
+        { role: 'user', text: "في أقرب وقت ممكن، هذا الأسبوع.", rtl: true },
+        { role: 'bot',  text: "شكراً! كيف يمكنني التواصل معك؟", rtl: true },
+        { role: 'user', text: "0555 123 456", rtl: true },
+        { role: 'bot',  text: "تم تقييم طلبك على أنه:", score: 'hot', scoreLabel: '🔥 طلب ساخن', rtl: true },
+      ],
+    };
+
+    let currentLang = 'en';
+    let animTimeout = null;
+
+    function showConvo(lang) {
+      currentLang = lang;
+      document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('active'));
+      event.target.classList.add('active');
+      if (animTimeout) clearTimeout(animTimeout);
+      renderConvo(lang);
+    }
+
+    function renderConvo(lang) {
+      const body = document.getElementById('chatBody');
+      body.innerHTML = '';
+      const msgs = convos[lang];
+      msgs.forEach((msg, i) => {
+        animTimeout = setTimeout(() => {
+          const el = document.createElement('div');
+          el.className = `msg ${msg.role}`;
+          const rtlClass = msg.rtl ? ' rtl-bubble' : '';
+          let inner = `<div class="msg-bubble${rtlClass}">${msg.text}</div>`;
+          if (msg.score) {
+            inner += `<span class="score-badge score-${msg.score}">${msg.scoreLabel}</span>`;
+          }
+          inner += `<div class="msg-time">${['Just now','Just now','1m ago','1m ago','2m ago','2m ago','3m ago','3m ago','3m ago'][i] || 'now'}</div>`;
+          el.innerHTML = inner;
+          body.appendChild(el);
+          body.scrollTop = body.scrollHeight;
+        }, i * 600);
+      });
+    }
+
+    // Auto-cycle through languages every 12 seconds
+    renderConvo('en');
+    let cycleIdx = 0;
+    const langs = ['en', 'fr', 'ar'];
+    setInterval(() => {
+      cycleIdx = (cycleIdx + 1) % langs.length;
+      const lang = langs[cycleIdx];
+      currentLang = lang;
+      document.querySelectorAll('.lang-btn').forEach((b, i) => {
+        b.classList.toggle('active', i === cycleIdx);
+      });
+      renderConvo(lang);
+    }, 13000);
+  </script>
+</body>
+</html>

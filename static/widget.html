@@ -371,10 +371,19 @@
         return 'session_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
     }
 
-    let sessionId = localStorage.getItem('chat_session_id');
+    // WHY sessionStorage, not localStorage:
+    // localStorage persists forever — the same session_id comes back even after
+    // closing the browser, which means every return visit picks up a stale
+    // conversation. sessionStorage is scoped to the tab: a page refresh keeps
+    // the same session (so a lead who hits F5 mid-conversation doesn't lose
+    // anything), but opening a new tab or closing and reopening the browser
+    // starts a clean session. That matches the intended behaviour ("browser
+    // memory for this visit") and means demo recordings always start fresh
+    // by just opening a new tab.
+    let sessionId = sessionStorage.getItem('chat_session_id');
     if (!sessionId) {
         sessionId = makeSessionId();
-        localStorage.setItem('chat_session_id', sessionId);
+        sessionStorage.setItem('chat_session_id', sessionId);
     }
 
     const STORAGE_KEY = 'chat_transcript_' + sessionId;
@@ -400,7 +409,7 @@
     //       remembers the session — the UI should too).
     function loadTranscript() {
         try {
-            const raw = localStorage.getItem(STORAGE_KEY);
+            const raw = sessionStorage.getItem(STORAGE_KEY);
             return raw ? JSON.parse(raw) : [];
         } catch (e) {
             return [];
@@ -408,7 +417,7 @@
     }
     function saveTranscript(list) {
         try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(list.slice(-MAX_STORED_MESSAGES)));
+            sessionStorage.setItem(STORAGE_KEY, JSON.stringify(list.slice(-MAX_STORED_MESSAGES)));
         } catch (e) {
             // Storage full or unavailable — the chat still works, it just
             // won't survive a reload. Not worth interrupting the user for.

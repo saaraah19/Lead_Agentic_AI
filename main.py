@@ -89,17 +89,33 @@ class ChatRequest(BaseModel):
     session_id: str = Field(..., min_length=1, max_length=128)
     message: str = Field(..., min_length=1, max_length=2000)
 
-# ─── ROUTE 1: HOME (Health Check) ──────────────────────────────────
-@app.get("/")
+# ─── ROUTE 1: HOME (Landing Page) ───────────────────────────────────
+# WHAT: Serve the portfolio landing page at the root URL.
+# WHY: When a client visits the deployed Render URL, they should see a
+#      professional product page — not a raw JSON blob. The landing page
+#      (static/landing.html) shows what the agent does, provides a live
+#      demo link (/widget), and links to the API docs. The actual health
+#      check data is still available at /health for infrastructure checks.
+@app.get("/", response_class=HTMLResponse)
 async def root():
     """
-    Health check endpoint.
-    Useful for verifying the app is running on Railway.
+    Serve the landing page. Clients visiting the Render URL see a
+    proper product page, not a raw JSON health-check response.
+    """
+    return FileResponse("static/landing.html")
 
-    WHAT CHANGED: this used to return a static "I'm alive" blob regardless
-    of whether the app could actually do anything useful. It now runs a
-    trivial DB query — if SQLite is locked, missing, or corrupted, this
-    reports "degraded" instead of lying that everything's fine.
+
+# ─── ROUTE 1b: HEALTH CHECK (for infra / uptime monitors) ───────────
+# WHAT: Separate JSON health endpoint for uptime monitors and CI checks.
+# WHY: The root now returns HTML, so automated health checks (Render's
+#      own health probe, UptimeRobot, CI pipelines) need a dedicated
+#      endpoint that still returns parseable JSON. /health is the
+#      conventional path for this.
+@app.get("/health")
+async def health():
+    """
+    Structured health check for infrastructure monitoring.
+    Returns { status, database, message } as JSON.
     """
     db_ok = True
     try:
@@ -113,13 +129,6 @@ async def root():
         "status": "online" if db_ok else "degraded",
         "database": "ok" if db_ok else "unreachable",
         "message": "Lead Qualification Agent is running!",
-        "endpoints": [
-            "/chat",                # POST - send messages
-            "/widget",              # GET  - shortcut to the chat UI
-            "/static/widget.html",  # GET  - direct access to the UI file
-            "/leads/export",        # GET  - download leads as CSV (requires token)
-            "/docs"                 # GET  - auto-generated API documentation
-        ]
     }
 
 # ─── ROUTE 2: CHAT ──────────────────────────────────────────────────

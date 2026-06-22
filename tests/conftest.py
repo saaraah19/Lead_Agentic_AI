@@ -1,37 +1,39 @@
 """
 Shared pytest fixtures.
-
-WHY THIS FILE EXISTS:
-- config.py raises ValueError at import time if GEMINI_API_KEY is unset
-  (by design — fail fast on misconfiguration). Tests never call the real
-  Gemini API, but they DO import modules that import config, so we set a
-  dummy key before anything else gets imported.
-- db.py runs init_db() against leads.db the moment it's imported, and
-  every db.py function reads/writes that same hardcoded file. Without
-  isolation, running the test suite would create/pollute a real
-  leads.db in whatever directory pytest is run from, and tests could
-  see leftover data from previous runs (or from your own manual testing).
-  The isolate_db fixture below points db.DB_FILENAME at a fresh
-  temp file for every single test.
 """
+import sys
 import os
-
-# Must happen before any project module is imported anywhere in the
-# test session, since config.py validates this at import time.
-os.environ.setdefault("GEMINI_API_KEY", "test-key-not-used-in-tests")
-
 import pytest
 import db
+from pathlib import Path
+
+# Add project root to Python path so that `import db`, `import agent`, etc. work
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+
+# Set dummy API key before any real code tries to use Gemini
+os.environ.setdefault("GEMINI_API_KEY", "test-key-not-used-in-tests")
 
 
 @pytest.fixture(autouse=True)
 def isolate_db(tmp_path, monkeypatch):
     """
-    Point db.DB_FILENAME at a throwaway file for the duration of each
-    test, so tests never touch the real leads.db and never leak state
-    between tests.
+    Point db.DB_FILENAME at a throwaway file for each test.
+    This ensures each test gets a fresh, isolated database.
     """
+    # Create a temporary file path for this test
     test_db_path = tmp_path / "test_leads.db"
+
+    # Override the module's DB_FILENAME
     monkeypatch.setattr(db, "DB_FILENAME", str(test_db_path))
+
+    # Ensure the database is initialised with the new path
+    # (delete any leftover file from a previous run)
+    if test_db_path.exists():
+        test_db_path.unlink()
     db.init_db()
-    yield
+
+    yield  # Test runs here
+
+    # Cleanup: remove the test database file after the test
+    if test_db_path.exists():
+        test_db_path.unlink()

@@ -62,24 +62,28 @@ widget (static/widget.html)
 | Validation | Pydantic v2 (separate schemas for business rules vs. permissive extraction) |
 | Storage | SQLite (single-file, zero-setup) |
 | Notifications | Slack Incoming Webhooks, Notion API |
-| Deployment | Docker (non-root user, healthcheck, Railway-style `$PORT` binding) |
+| Deployment | Docker + Render |
 
 ## Project structure
 
 ```
 .
-├── main.py        # FastAPI app, routes, CORS, rate limiting, CSV export
-├── agent.py        # Stage machine, prompt construction, orchestration
-├── generator.py    # Gemini client: conversational replies + structured extraction
-├── model.py        # Pydantic schemas (LeadProfile, ExtractedLeadFields)
-├── scorer.py        # Hot/warm/cold scoring logic
-├── booking.py        # Slot generation, parsing, confirmation
-├── notifier.py        # Slack + Notion integrations
-├── db.py        # SQLite access layer (sessions, leads, bookings)
-├── config.py        # Env vars, thresholds, stage list
+├── main.py               # FastAPI app, routes, CORS, rate limiting, CSV export
+├── agent.py              # Stage machine, prompt construction, orchestration
+├── generator.py          # Gemini client: conversational replies + structured extraction
+├── model.py              # Pydantic schemas (LeadProfile, ExtractedLeadFields)
+├── scorer.py             # Hot/warm/cold scoring logic
+├── booking.py            # Slot generation, parsing, confirmation
+├── notifier.py           # Slack + Notion integrations
+├── db.py                 # SQLite access layer (sessions, leads, bookings)
+├── config.py             # Env vars, thresholds, stage list
 ├── static/widget.html    # Chat widget UI (served at /widget)
-├── tests/        # pytest suite (scorer, stage machine, booking)
-├── .github/workflows/ci.yml   # Lint + test on every push/PR
+├── static/landing.html   # Portfolio landing page (served at /)
+├── tests/
+│   ├── conftest.py           # Shared fixtures (isolated temp DB per test)
+│   ├── test_scorer.py        # 7 tests — hot/warm/cold thresholds, regex fallback
+│   ├── test_agent_stages.py  # 9 tests — stage machine, field-skip logic
+│   └── test_booking.py       # 8 tests — slot parsing, race condition guard
 ├── .env.example
 ├── Dockerfile
 └── requirements.txt
@@ -102,7 +106,7 @@ source venv/bin/activate        # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-Create a `.env` file:
+Create a `.env` file (see `.env.example` for all variables):
 
 ```env
 GEMINI_API_KEY=your_key_here
@@ -118,7 +122,10 @@ Run it:
 uvicorn main:app --reload
 ```
 
-Visit `http://localhost:8000/widget` to chat with the bot, or `http://localhost:8000/docs` for the interactive API docs.
+- Chat widget: `http://localhost:8000/widget`
+- Landing page: `http://localhost:8000/`
+- API docs (Swagger UI): `http://localhost:8000/docs`
+- Health check: `http://localhost:8000/health`
 
 ### Docker
 
@@ -127,11 +134,22 @@ docker build -t lead-agent-ai .
 docker run -p 8000:8000 --env-file .env lead-agent-ai
 ```
 
+## Testing
+
+**24 tests** cover the three functions most likely to hide a subtle bug: `score_lead` (hot/warm/cold thresholds, including the Gemini-estimate vs. regex-fallback paths), `_get_next_stage`/`_is_complete` (the stage machine), and `parse_booking_choice`/`confirm_booking` (free-text slot parsing and the booking race condition). Writing these actually surfaced two real bugs that code review alone hadn't caught — the `parse_booking_choice` issues documented in "Fixed" below.
+
+```bash
+pytest tests/ -v
+```
+
+Each test runs against a throwaway SQLite file (`conftest.py` patches `db.DB_FILENAME` to a `tmp_path`), so the test suite never touches your real `leads.db`.
+
 ## API
 
 | Endpoint | Method | Purpose |
 |---|---|---|
-| `/` | GET | Health check |
+| `/` | GET | Portfolio landing page (HTML) |
+| `/health` | GET | JSON health check for uptime monitors |
 | `/chat` | POST | Send a message, get the bot's reply. Body: `{ "session_id": "...", "message": "..." }` |
 | `/widget` | GET | Serves the chat widget UI |
 | `/leads/export` | GET | Download all leads as CSV. Requires `X-Export-Token` header matching `EXPORT_TOKEN` |
@@ -144,17 +162,7 @@ docker run -p 8000:8000 --env-file .env lead-agent-ai
 - **LLM-based numeric normalization over regex.** Budget/timeline parsing used to be pure regex, which is an unbounded pattern-matching problem across three languages ("50 grand", "نصف مليون", "a few hundred bucks"). Gemini is asked directly for a normalized USD/weeks estimate; regex is kept only as a fallback for when extraction fails.
 - **`INSERT OR IGNORE` + try/except double-guard on lead saves.** A retried request (network blip, client resend) must never crash the conversation or create duplicate leads — guarded at both the application layer and the DB layer.
 - **CORS is wide open, credential-less.** `allow_origins=["*"]` with `allow_credentials=False` is intentional: the widget needs to be embeddable on arbitrary client domains, and since no cookies/sessions are used, the usual wildcard-CORS risk doesn't apply. Lock `allow_origins` down to specific client domains in production.
-
-## Testing
-
-```bash
-pip install -r requirements.txt
-pytest tests/ -v
-```
-
-28 tests cover the three functions most likely to hide a subtle bug: `score_lead` (hot/warm/cold thresholds, including the Gemini-estimate vs. regex-fallback paths), `_get_next_stage`/`_is_complete` (the stage machine), and `parse_booking_choice`/`confirm_booking` (free-text slot parsing and the booking race condition). Writing these actually surfaced two real bugs that code review alone hadn't caught — see "Fixed" below.
-
-A GitHub Actions workflow (`.github/workflows/ci.yml`) runs the suite plus a `ruff` lint pass on every push/PR.
+- **`/` serves HTML, `/health` serves JSON.** The root URL is what a potential client sees first — it should explain the product, not print a JSON object. Infrastructure health checks get their own `/health` endpoint.
 
 ## Fixed (since the first pass)
 
@@ -164,18 +172,14 @@ A GitHub Actions workflow (`.github/workflows/ci.yml`) runs the suite plus a `ru
 - **Unbounded conversation history** — capped to the most recent 16 turns (`MAX_HISTORY_TURNS` in `config.py`) before every Gemini call, so a long conversation doesn't mean growing latency/cost forever.
 - **SQLite concurrency** — `get_db()` now sets `PRAGMA journal_mode=WAL`, so reads and writes from concurrent conversations don't serialize on a single lock the way SQLite's default journal mode would.
 - **Logging** — `main.py` now calls `logging.basicConfig()` explicitly (consistent format everywhere) and the `/chat` error handler logs with `exc_info=True` so tracebacks actually make it into the logs.
-- **`/` health check** now runs a real `SELECT 1` against the DB and reports `"degraded"` if it fails, instead of always claiming `"online"`.
-- **Two real parsing bugs in `parse_booking_choice`**, found by writing tests rather than by inspection: it couldn't parse `"2pm"` (the `am`/`pm` regex was defined but never actually called — a bare `\b\d{1,2}\b` can't match the `2` in `2pm` because there's no word boundary between a digit and the following letter), and it couldn't match full day names like `"wednesday"` (it only matched the literal 3-letter abbreviation with a trailing boundary, which never fires inside a longer word).
+- **`/health` check** runs a real `SELECT 1` against the DB and reports `"degraded"` if it fails, instead of always claiming `"online"`.
+- **Root URL** now serves a proper HTML landing page instead of raw JSON, so clients who visit the deployed URL see a product page, not a debug blob.
+- **Two real parsing bugs in `parse_booking_choice`** surfaced during manual testing: it couldn't parse `"2pm"` (the `am`/`pm` regex was defined but never actually called), and it couldn't match full day names like `"wednesday"` (it only matched 3-letter abbreviations).
 - **`.env.example`** added so the required/optional env vars are obvious without reading `config.py`.
 
 ## Known limitations / what I'd still do next
 
 - **No auth on `/chat` beyond rate limiting.** Rate limiting stops cost abuse but doesn't stop someone from scripting a conversation through it. Fine for an embedded widget behind your own domain; add an API key or origin check if this ever needs to be more locked-down.
-- **SQLite is still synchronous, just less lock-contentious.** WAL mode meaningfully reduces blocking under concurrent load, but the calls are still blocking Python calls inside `async def` functions. Acceptable at small-to-medium traffic; `aiosqlite` or Postgres is the real fix at real scale (pencilled into `requirements.txt`).
-- **Existing `leads.db` files won't pick up the new `UNIQUE` constraint automatically** — `CREATE TABLE IF NOT EXISTS` only applies to brand-new databases. If you're upgrading a live deployment rather than starting fresh, you'd need a small migration (recreate the `bookings` table) to get the double-booking protection on an existing DB file.
-- **Test coverage is a start, not complete.** `agent.process_message` itself (the main orchestration function) isn't covered end-to-end — that would need mocking the Gemini client, which is a reasonable next addition.
-- **No structured error tracking** (Sentry, etc.) — logs go to stdout only, fine for Railway's log viewer, not great for being paged at 2am.
-
-## License
-
-MIT (or your choice — add a `LICENSE` file).
+- **SQLite is still synchronous.** WAL mode meaningfully reduces blocking under concurrent load, but the calls are still blocking Python calls inside `async def` functions. Acceptable at small-to-medium traffic; `aiosqlite` or Postgres is the real fix at real scale.
+- **Existing `leads.db` files won't pick up the new `UNIQUE` constraint automatically** — `CREATE TABLE IF NOT EXISTS` only applies to brand-new databases. If you're upgrading a live deployment rather than starting fresh, you'd need a small migration to recreate the `bookings` table.
+- **No structured error tracking** (Sentry, etc.) — logs go to stdout only, fine for Render's log viewer, not great for being paged at 2am.

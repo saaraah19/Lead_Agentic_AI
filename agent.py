@@ -31,21 +31,23 @@ def detect_language(text: str) -> str:
 def _fallback_extract(text: str) -> dict:
     result = {"need": "", "budget": "", "timeline": "", "contact": ""}
 
+    # ─── Budget ──────────────────────────────────────────────────────
     budget_patterns = [
-        r'\$?([\d,]+)\s*(k|K|thousand|grand|grands)',
-        r'\$([\d,]+)',
-        r'(\d+)\s*(k|K|thousand|grand|grands)',
+        (r'\$?([\d,]+)\s*(k|K|thousand|grand|grands)', True),
+        (r'\$([\d,]+)', False),
+        (r'(\d+)\s*(k|K|thousand|grand|grands)', True),
     ]
-    for pattern in budget_patterns:
+    for pattern, has_multiplier in budget_patterns:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
             num = match.group(1).replace(',', '')
-            if match.group(2) in ('k', 'K', 'thousand', 'grand', 'grands'):
+            if has_multiplier and match.group(2) in ('k', 'K', 'thousand', 'grand', 'grands'):
                 result["budget"] = f"${int(float(num)) * 1000}"
             else:
                 result["budget"] = f"${num}"
             break
 
+    # ─── Timeline ────────────────────────────────────────────────────
     timeline_match = re.search(r'(\d+)\s*(week|month|day|year|weeks|months|days|years)', text, re.IGNORECASE)
     if timeline_match:
         num = timeline_match.group(1)
@@ -56,6 +58,7 @@ def _fallback_extract(text: str) -> dict:
     elif re.search(r'\b(ASAP|immediate|now|today)\b', text, re.IGNORECASE):
         result["timeline"] = "ASAP"
 
+    # ─── Contact ────────────────────────────────────────────────────
     email = re.search(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text)
     if email:
         result["contact"] = email.group(0)
@@ -64,6 +67,7 @@ def _fallback_extract(text: str) -> dict:
         if phone:
             result["contact"] = phone.group(0)
 
+    # ─── Need ──────────────────────────────────────────────────────
     need_keywords = {
         "website": "Website",
         "automation": "Automation",
@@ -77,7 +81,6 @@ def _fallback_extract(text: str) -> dict:
             break
 
     return result
-
 # ─── MAIN ENTRY POINT ──────────────────────────────────────────────────
 async def process_message(session_id: str, user_message: str) -> str:
     session = get_session(session_id)

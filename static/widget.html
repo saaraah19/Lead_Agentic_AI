@@ -293,6 +293,61 @@
         clip: rect(0 0 0 0);
         white-space: nowrap;
     }
+
+    /* ─── Onboarding hint bubble ───────────────────────────────── */
+    /* Appears once per session to direct the user's eye to the button.
+       Positioned directly above the launcher, with a caret pointing down. */
+    #cwa-hint {
+        position: fixed;
+        bottom: calc(88px + env(safe-area-inset-bottom, 0px));
+        right: 14px;
+        background: #fff;
+        border: 1px solid var(--cwa-border);
+        border-radius: 12px;
+        padding: 10px 14px;
+        font-family: var(--cwa-font);
+        font-size: 13.5px;
+        color: var(--cwa-ink);
+        box-shadow: 0 6px 24px rgba(0,0,0,0.11);
+        z-index: 10001;
+        white-space: nowrap;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        cursor: pointer;
+        user-select: none;
+        transform-origin: bottom right;
+        animation: cwa-hint-in 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+    /* Caret pointing down-right toward the button */
+    #cwa-hint::after {
+        content: '';
+        position: absolute;
+        bottom: -7px;
+        right: 26px;
+        border-left: 7px solid transparent;
+        border-right: 7px solid transparent;
+        border-top: 7px solid #fff;
+        filter: drop-shadow(0 1px 0 rgba(0,0,0,0.08));
+    }
+    #cwa-hint.cwa-hint-out {
+        animation: cwa-hint-out 0.22s ease forwards;
+    }
+    @keyframes cwa-hint-in {
+        from { opacity: 0; transform: translateY(8px) scale(0.95); }
+        to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    @keyframes cwa-hint-out {
+        from { opacity: 1; transform: translateY(0) scale(1); }
+        to   { opacity: 0; transform: translateY(5px) scale(0.97); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        #cwa-hint, #cwa-hint.cwa-hint-out { animation: none; }
+    }
+    /* On mobile: align the bubble with the left edge of the button */
+    @media (max-width: 480px) {
+        #cwa-hint { right: 16px; }
+    }
 </style>
 </head>
 <body>
@@ -545,6 +600,52 @@
             sendMessage();
         }
     });
+
+    // ─── ONBOARDING HINT ───────────────────────────────────────────
+    // Show a "chat with us" bubble above the launcher once per session.
+    // Dismissed on click, on Escape, when the chat opens, or after 6 s.
+    (function () {
+        const HINT_KEY = 'cwa_hint_seen';
+        if (sessionStorage.getItem(HINT_KEY)) return;
+
+        let hintEl = null;
+        let hintTimer = null;
+
+        function removeHint() {
+            if (!hintEl) return;
+            hintEl.classList.add('cwa-hint-out');
+            setTimeout(function () { hintEl && hintEl.remove(); hintEl = null; }, 230);
+            clearTimeout(hintTimer);
+        }
+
+        function showHint() {
+            sessionStorage.setItem(HINT_KEY, '1');
+            hintEl = document.createElement('div');
+            hintEl.id = 'cwa-hint';
+            hintEl.setAttribute('role', 'status');
+            hintEl.setAttribute('aria-label', 'Chat with us');
+            hintEl.innerHTML = '<span aria-hidden="true">👋</span><span>Chat with us!</span>';
+            document.getElementById('chat-widget-root').appendChild(hintEl);
+
+            // Dismiss on direct click of the hint bubble
+            hintEl.addEventListener('click', function () {
+                removeHint();
+                openWindow();
+            });
+
+            // Auto-dismiss after 6 s
+            hintTimer = setTimeout(removeHint, 6000);
+        }
+
+        // Reveal after a short delay so the page feels settled first
+        setTimeout(showHint, 1400);
+
+        // Dismiss immediately if the user opens the chat themselves
+        button.addEventListener('click', removeHint, { once: true });
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') removeHint();
+        });
+    }());
 })();
 </script>
 

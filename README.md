@@ -1,87 +1,117 @@
 # Lead Agent AI
 
-An AI chatbot that qualifies inbound sales leads in **English, French, and Arabic**, scores them as hot/warm/cold, and automatically books a call with the ones worth talking to — built to be dropped into any small-business website as a chat widget.
+![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.137-009688?logo=fastapi&logoColor=white)
+![Gemini](https://img.shields.io/badge/Gemini-2.5_Flash-4285F4?logo=google&logoColor=white)
+![CI](https://img.shields.io/github/actions/workflow/status/YOUR_USERNAME/lead-agent-ai/ci.yml?label=CI)
+![License](https://img.shields.io/badge/license-MIT-green)
+
+> **[→ Live demo](https://your-app.onrender.com/widget)** · **[→ API docs](https://your-app.onrender.com/docs)**
+
+An AI chatbot that qualifies inbound sales leads in **English, French, and Arabic**, scores them as hot/warm/cold, and books a call with the right ones — deployed as a chat widget that drops into any small-business website.
 
 Built with FastAPI + Google Gemini, backed by SQLite, with Slack and Notion integrations for the business owner.
 
 ---
 
-## Why this exists
+## The problem it solves
 
-Small businesses lose leads to slow follow-up. This bot sits on a website 24/7, has a structured conversation in whatever language the visitor writes in, pulls out the four things a salesperson actually needs (need, budget, timeline, contact), scores the lead automatically, and — for the good ones — offers a booking slot on the spot. Hot leads also trigger an instant Slack alert.
+Small businesses lose leads to slow follow-up. This bot sits on a website 24/7, has a structured conversation in whatever language the visitor writes in, extracts the four things a salesperson actually needs (need, budget, timeline, contact), scores the lead automatically, and — for the worthwhile ones — offers a booking slot on the spot.
+
+---
 
 ## How it works
 
-The conversation is modeled as an explicit stage machine, not a freeform chat loop:
+The conversation is an explicit stage machine, not a freeform chat loop:
 
 ```
 greeting → need → budget → timeline → contact → scoring → booking → closed
 ```
 
-1. **Language detection** — first message determines en/fr/ar (Arabic via Unicode range, French via accent/keyword markers, English as default), then the whole conversation stays in that language.
-2. **Extraction** — every turn, a structured Gemini call (`extract_lead_profile`) reads the full conversation and pulls out `need`, `budget`, `timeline`, `contact` — plus *normalized numeric estimates* (`budget_usd_estimate`, `timeline_weeks_estimate`) so "50 grand" / "نصف مليون" / "cinq cents euros" all become comparable numbers without regex guesswork.
-3. **Regex fallback** — if the Gemini extraction call fails, a regex-based extractor (`_fallback_extract`) fills in whatever it can, so a single API hiccup never stalls the conversation.
-4. **Stage advancement** — once a stage's field is filled, the bot moves to the next one. Each stage gets its own tightly scoped system prompt with an explicit *forbidden actions* list, so the LLM doesn't free-associate into discovery questions it has no business asking.
-5. **Scoring** — once all critical fields are present, `scorer.py` applies simple, explainable thresholds (budget ≥ $1,000 **and** timeline ≤ 4 weeks → hot; any signal → warm; neither → cold).
-6. **Routing on score**:
-   - **Hot** → instant Slack alert + offered a call immediately.
-   - **Warm** → logged to Notion + offered a call, softer framing.
-   - **Cold** → polite close, no booking offered.
-7. **Booking** — generates the next available weekday slots (10am/2pm, skipping already-booked ones), lets the user pick by number/time/day, and persists the confirmed slot to prevent double-booking.
-8. **Every lead** (hot, warm, or cold) is logged to Notion as a permanent CRM record; hot leads additionally ping Slack.
+1. **Language detection** — first message determines en/fr/ar (Arabic via Unicode range, French via accent/keyword markers, English as default). The whole conversation stays in that language from there.
+
+2. **Extraction** — every turn, a structured Gemini call reads the full conversation and extracts `need`, `budget`, `timeline`, `contact` — plus normalized numeric estimates (`budget_usd_estimate`, `timeline_weeks_estimate`) so "50 grand" / "نصف مليون" / "cinq cents euros" all become comparable numbers without regex gymnastics.
+
+3. **Regex fallback** — if the Gemini extraction call fails, a regex extractor fills in what it can so a single API hiccup never stalls the conversation.
+
+4. **Stage advancement** — once a stage's field is filled, the bot moves to the next one. Each stage gets a tightly scoped system prompt with an explicit *forbidden actions* list, so the LLM doesn't invent discovery questions it shouldn't be asking.
+
+5. **Scoring** — once all fields are present, `scorer.py` applies simple, readable thresholds:
+   - **Hot** — budget ≥ $1,000 **and** timeline ≤ 4 weeks
+   - **Warm** — some budget or some urgency
+   - **Cold** — neither
+
+6. **Routing on score:**
+   - Hot → instant Slack alert + call booking offered immediately
+   - Warm → logged to Notion + call booking offered, softer framing
+   - Cold → polite close, no booking
+
+7. **Booking** — generates the next available weekday slots (10am/2pm, skipping already-taken ones), lets the user pick by number, time, or day name, and persists the confirmed slot to prevent double-booking including race conditions.
+
+8. **Every lead** (hot, warm, or cold) is logged to Notion as a permanent CRM record.
+
+---
 
 ## Architecture
 
 ```
-widget (static/widget.html)
-        │  POST /chat { session_id, message }
-        ▼
-   main.py (FastAPI)
-        │
-        ▼
-   agent.py  ───────────────► generator.py ──► Gemini API
-   (stage machine,                │                 (conversation +
-    scoring trigger,              │                  structured extraction)
-    booking trigger)              │
-        │                         │
-        ▼                         ▼
-   db.py (SQLite)            scorer.py
-   sessions / leads /        booking.py
-   bookings tables                │
-        │                         ▼
-        ▼                   notifier.py ──► Slack webhook
-   /leads/export (CSV)                  └──► Notion API
+widget (/widget)
+    │  POST /chat { session_id, message }
+    ▼
+main.py (FastAPI + rate limiting)
+    │
+    ▼
+agent.py  ──────────────────► generator.py ──► Gemini API
+(stage machine,                                  conversation reply +
+ scoring trigger,                                structured extraction
+ booking trigger)
+    │
+    ├──► db.py (SQLite)
+    │    sessions / leads / bookings
+    │
+    ├──► scorer.py
+    │
+    ├──► booking.py
+    │
+    └──► notifier.py ──► Slack webhook
+                     └──► Notion API
 ```
+
+---
 
 ## Tech stack
 
-| Layer | Choice |
-|---|---|
-| API framework | FastAPI + Uvicorn |
-| LLM | Google Gemini (`gemini-2.5-flash`) via `google-genai` |
-| Validation | Pydantic v2 (separate schemas for business rules vs. permissive extraction) |
-| Storage | SQLite (single-file, zero-setup) |
-| Notifications | Slack Incoming Webhooks, Notion API |
-| Deployment | Docker + Render |
+| Layer | Choice | Why |
+|---|---|---|
+| API | FastAPI + Uvicorn | Async, fast, great DX for a portfolio piece |
+| LLM | Gemini 2.5 Flash | Best-in-class at instruction following + multilingual |
+| Validation | Pydantic v2 | Two schemas: strict business rules vs permissive extraction |
+| Storage | SQLite + WAL mode | Single-file, zero-setup; WAL handles concurrent sessions |
+| Notifications | Slack Webhooks + Notion API | What a real SMB owner would actually check |
+| Rate limiting | slowapi | Per-IP limit on `/chat` to prevent Gemini cost abuse |
+| Deployment | Docker + Render | One `docker build` and it's live |
+
+---
 
 ## Project structure
 
 ```
 .
-├── main.py               # FastAPI app, routes, CORS, rate limiting, CSV export
+├── main.py               # FastAPI app, routes, rate limiting, CSV export
 ├── agent.py              # Stage machine, prompt construction, orchestration
-├── generator.py          # Gemini client: conversational replies + structured extraction
+├── generator.py          # Gemini client: replies + structured extraction
 ├── model.py              # Pydantic schemas (LeadProfile, ExtractedLeadFields)
-├── scorer.py             # Hot/warm/cold scoring logic
-├── booking.py            # Slot generation, parsing, confirmation
+├── scorer.py             # Hot/warm/cold logic
+├── booking.py            # Slot generation, free-text parsing, confirmation
 ├── notifier.py           # Slack + Notion integrations
-├── db.py                 # SQLite access layer (sessions, leads, bookings)
+├── db.py                 # SQLite layer (sessions, leads, bookings)
 ├── config.py             # Env vars, thresholds, stage list
-├── static/widget.html    # Chat widget UI (served at /widget)
-├── static/landing.html   # Portfolio landing page (served at /)
+├── static/
+│   ├── widget.html       # Chat widget UI (/widget)
+│   └── landing.html      # Portfolio landing page (/)
 ├── tests/
-│   ├── conftest.py           # Shared fixtures (isolated temp DB per test)
-│   ├── test_scorer.py        # 7 tests — hot/warm/cold thresholds, regex fallback
+│   ├── conftest.py           # Isolated temp DB per test
+│   ├── test_scorer.py        # 7 tests — hot/warm/cold thresholds
 │   ├── test_agent_stages.py  # 9 tests — stage machine, field-skip logic
 │   └── test_booking.py       # 8 tests — slot parsing, race condition guard
 ├── .env.example
@@ -89,43 +119,50 @@ widget (static/widget.html)
 └── requirements.txt
 ```
 
+---
+
 ## Setup
 
 ### Prerequisites
 - Python 3.12+
-- A Gemini API key
-- (Optional) Slack webhook URL, Notion integration token + database ID
+- A Gemini API key (free tier works): [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+- Optional: Slack webhook URL, Notion integration token + database ID
 
-### Local
+### Run locally
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/YOUR_USERNAME/lead-agent-ai
 cd lead-agent-ai
+
 python -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
+source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-Create a `.env` file (see `.env.example` for all variables):
+Copy `.env.example` to `.env` and fill in your keys:
+
+```bash
+cp .env.example .env
+```
 
 ```env
 GEMINI_API_KEY=your_key_here
-SLACK_WEBHOOK_URL=               # optional
-NOTION_API_KEY=                  # optional
-NOTION_DATABASE_ID=              # optional
-EXPORT_TOKEN=some-long-random-string   # required to use /leads/export
+EXPORT_TOKEN=some-long-random-string   # required for /leads/export
+SLACK_WEBHOOK_URL=                     # optional
+NOTION_API_KEY=                        # optional
+NOTION_DATABASE_ID=                    # optional
 ```
-
-Run it:
 
 ```bash
 uvicorn main:app --reload
 ```
 
-- Chat widget: `http://localhost:8000/widget`
-- Landing page: `http://localhost:8000/`
-- API docs (Swagger UI): `http://localhost:8000/docs`
-- Health check: `http://localhost:8000/health`
+| URL | What you get |
+|---|---|
+| `http://localhost:8000/widget` | Chat widget demo |
+| `http://localhost:8000/` | Landing page |
+| `http://localhost:8000/docs` | Swagger UI |
+| `http://localhost:8000/health` | JSON health check |
 
 ### Docker
 
@@ -134,52 +171,72 @@ docker build -t lead-agent-ai .
 docker run -p 8000:8000 --env-file .env lead-agent-ai
 ```
 
+---
+
 ## Testing
 
-**24 tests** cover the three functions most likely to hide a subtle bug: `score_lead` (hot/warm/cold thresholds, including the Gemini-estimate vs. regex-fallback paths), `_get_next_stage`/`_is_complete` (the stage machine), and `parse_booking_choice`/`confirm_booking` (free-text slot parsing and the booking race condition). Writing these actually surfaced two real bugs that code review alone hadn't caught — the `parse_booking_choice` issues documented in "Fixed" below.
+24 tests across the three areas most likely to hide a subtle bug: `score_lead` (hot/warm/cold thresholds, including Gemini-estimate vs regex-fallback paths), `_get_next_stage`/`_is_complete` (the stage machine), and `parse_booking_choice`/`confirm_booking` (free-text slot parsing and the race-condition guard). Writing these actually surfaced two real bugs that code review alone hadn't caught — documented below.
 
 ```bash
 pytest tests/ -v
 ```
 
-Each test runs against a throwaway SQLite file (`conftest.py` patches `db.DB_FILENAME` to a `tmp_path`), so the test suite never touches your real `leads.db`.
+Each test runs against a throwaway SQLite file (`conftest.py` patches `db.DB_FILENAME` to a `tmp_path`), so the suite never touches your real `leads.db`.
+
+---
 
 ## API
 
-| Endpoint | Method | Purpose |
-|---|---|---|
-| `/` | GET | Portfolio landing page (HTML) |
-| `/health` | GET | JSON health check for uptime monitors |
-| `/chat` | POST | Send a message, get the bot's reply. Body: `{ "session_id": "...", "message": "..." }` |
-| `/widget` | GET | Serves the chat widget UI |
-| `/leads/export` | GET | Download all leads as CSV. Requires `X-Export-Token` header matching `EXPORT_TOKEN` |
-| `/docs` | GET | Auto-generated Swagger UI |
+| Endpoint | Method | Auth | Purpose |
+|---|---|---|---|
+| `/` | GET | — | Landing page |
+| `/health` | GET | — | JSON health check (runs a real `SELECT 1`) |
+| `/chat` | POST | — | Send a message, get the bot's reply |
+| `/widget` | GET | — | Chat widget UI |
+| `/leads/export` | GET | `X-Export-Token` header | Download all leads as CSV |
+| `/docs` | GET | — | Auto-generated Swagger UI |
 
-## Design decisions worth knowing
+**`/chat` request body:**
+```json
+{ "session_id": "abc123", "message": "Hi, I need a website" }
+```
 
-- **Stage-scoped prompts over one mega-prompt.** Each stage gets an explicit task and an explicit forbidden-actions list. Without the latter, the LLM reliably "helps" by asking extra discovery questions a lean qualifier shouldn't be asking.
-- **Two separate Pydantic schemas.** `LeadProfile` enforces business rules (valid stage, valid language); `ExtractedLeadFields` is deliberately permissive because mid-conversation, most fields are legitimately still blank — and returns `None` rather than empty values on extraction failure, so a failed API call never overwrites previously known answers with blanks.
-- **LLM-based numeric normalization over regex.** Budget/timeline parsing used to be pure regex, which is an unbounded pattern-matching problem across three languages ("50 grand", "نصف مليون", "a few hundred bucks"). Gemini is asked directly for a normalized USD/weeks estimate; regex is kept only as a fallback for when extraction fails.
-- **`INSERT OR IGNORE` + try/except double-guard on lead saves.** A retried request (network blip, client resend) must never crash the conversation or create duplicate leads — guarded at both the application layer and the DB layer.
-- **CORS is wide open, credential-less.** `allow_origins=["*"]` with `allow_credentials=False` is intentional: the widget needs to be embeddable on arbitrary client domains, and since no cookies/sessions are used, the usual wildcard-CORS risk doesn't apply. Lock `allow_origins` down to specific client domains in production.
-- **`/` serves HTML, `/health` serves JSON.** The root URL is what a potential client sees first — it should explain the product, not print a JSON object. Infrastructure health checks get their own `/health` endpoint.
+**Rate limits:** `/chat` is capped at 20 req/min per IP; `/leads/export` at 10 req/min.
 
-## Fixed (since the first pass)
+---
 
-- **`/chat` and `/leads/export` now rate-limited** (20/min and 10/min per IP via `slowapi`), so a single client can't run up the Gemini bill or hammer the export endpoint.
-- **`create_session` race condition** — two near-simultaneous first messages with the same `session_id` used to crash one of them with an uncaught `IntegrityError`. Now uses `INSERT OR IGNORE`, same pattern already used for `save_lead`.
-- **Booking double-booking race** — `bookings.slot_time` is now `UNIQUE` at the DB layer; if two leads are offered the same slot and both confirm, the second gets a clear "that slot was just taken" message and a refreshed slot list, instead of two people silently booking the same call.
-- **Unbounded conversation history** — capped to the most recent 16 turns (`MAX_HISTORY_TURNS` in `config.py`) before every Gemini call, so a long conversation doesn't mean growing latency/cost forever.
-- **SQLite concurrency** — `get_db()` now sets `PRAGMA journal_mode=WAL`, so reads and writes from concurrent conversations don't serialize on a single lock the way SQLite's default journal mode would.
-- **Logging** — `main.py` now calls `logging.basicConfig()` explicitly (consistent format everywhere) and the `/chat` error handler logs with `exc_info=True` so tracebacks actually make it into the logs.
-- **`/health` check** runs a real `SELECT 1` against the DB and reports `"degraded"` if it fails, instead of always claiming `"online"`.
-- **Root URL** now serves a proper HTML landing page instead of raw JSON, so clients who visit the deployed URL see a product page, not a debug blob.
-- **Two real parsing bugs in `parse_booking_choice`** surfaced during manual testing: it couldn't parse `"2pm"` (the `am`/`pm` regex was defined but never actually called), and it couldn't match full day names like `"wednesday"` (it only matched 3-letter abbreviations).
-- **`.env.example`** added so the required/optional env vars are obvious without reading `config.py`.
+## Design decisions
 
-## Known limitations / what I'd still do next
+**Stage-scoped prompts over one mega-prompt.** Each stage gets an explicit task and an explicit *forbidden actions* list. Without the latter, the LLM reliably "helps" by asking extra discovery questions a lean qualifier shouldn't be asking — asking about business risks during the budget stage, for example.
 
-- **No auth on `/chat` beyond rate limiting.** Rate limiting stops cost abuse but doesn't stop someone from scripting a conversation through it. Fine for an embedded widget behind your own domain; add an API key or origin check if this ever needs to be more locked-down.
-- **SQLite is still synchronous.** WAL mode meaningfully reduces blocking under concurrent load, but the calls are still blocking Python calls inside `async def` functions. Acceptable at small-to-medium traffic; `aiosqlite` or Postgres is the real fix at real scale.
-- **Existing `leads.db` files won't pick up the new `UNIQUE` constraint automatically** — `CREATE TABLE IF NOT EXISTS` only applies to brand-new databases. If you're upgrading a live deployment rather than starting fresh, you'd need a small migration to recreate the `bookings` table.
-- **No structured error tracking** (Sentry, etc.) — logs go to stdout only, fine for Render's log viewer, not great for being paged at 2am.
+**Two separate Pydantic schemas.** `LeadProfile` enforces business rules (valid stage, valid language); `ExtractedLeadFields` is deliberately permissive. Mid-conversation, most fields are legitimately still blank, and returning `None` on extraction failure (rather than empty values) means a failed API call never silently overwrites previously known answers.
+
+**LLM-based numeric normalization over regex.** Budget/timeline parsing used to be pure regex, which is an unbounded pattern-matching problem across three languages. Gemini is asked directly for a normalized USD/weeks estimate; regex is kept only as a fallback.
+
+**`INSERT OR IGNORE` + try/except double-guard on lead saves.** A retried request must never crash the conversation or create duplicate leads — guarded at both the application layer and the DB layer.
+
+**`/` serves HTML, `/health` serves JSON.** The root URL is what a potential client sees first. Infrastructure health checks get their own dedicated endpoint.
+
+---
+
+## Bugs fixed during development
+
+- **`/chat` and `/leads/export` rate-limited** (20/min and 10/min per IP) — without this, a single client could run up the Gemini bill.
+- **`create_session` race condition** — two near-simultaneous first messages with the same `session_id` crashed one with an uncaught `IntegrityError`. Now uses `INSERT OR IGNORE`.
+- **Booking double-booking race** — `bookings.slot_time` is now `UNIQUE` at the DB layer; the second confirmation gets a clear "that slot was just taken" message and a refreshed list.
+- **Unbounded conversation history** — capped to 16 turns (`MAX_HISTORY_TURNS`) before every Gemini call.
+- **SQLite concurrency** — `get_db()` sets `PRAGMA journal_mode=WAL`, so reads and writes from concurrent sessions don't serialize on a single lock.
+- **Logging** — `main.py` calls `logging.basicConfig()` explicitly; `/chat` error handler uses `exc_info=True` so tracebacks actually reach the logs.
+- **`/health` runs a real `SELECT 1`** instead of always claiming `"online"`.
+- **Two bugs in `parse_booking_choice`** surfaced by the test suite: "2pm" wasn't parsed (the am/pm regex was defined but never called), and "wednesday" didn't match (only 3-letter abbreviations were checked).
+- **Stage variable stale-read** in the booking flow caused the bot to loop on "I have everything I need" instead of offering slots.
+
+---
+
+## Known limitations
+
+- **SQLite is synchronous.** WAL mode reduces lock contention, but the calls still block the event loop. `aiosqlite` or Postgres is the right fix at real scale (see commented-out line in `requirements.txt`).
+- **Widget embeds via `window.location.origin`.** To embed on a client's own domain, the `API_BASE` in `widget.html` needs to point to the deployed API URL explicitly.
+- **Booking slots use server local time.** No timezone is communicated to the user — fine when server and client share a timezone, something to address for cross-timezone deployments.
+- **Existing `leads.db` files won't pick up the `UNIQUE` constraint** on `bookings.slot_time` automatically — `CREATE TABLE IF NOT EXISTS` only applies to new databases. A live upgrade needs a one-time migration.
+- **No structured error tracking.** Logs go to stdout only, which is fine for Render's log viewer, not great for being paged at 2am.

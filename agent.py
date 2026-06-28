@@ -81,6 +81,7 @@ def _fallback_extract(text: str) -> dict:
             break
 
     return result
+
 # ─── MAIN ENTRY POINT ──────────────────────────────────────────────────
 async def process_message(session_id: str, user_message: str) -> str:
     session = get_session(session_id)
@@ -156,8 +157,6 @@ async def process_message(session_id: str, user_message: str) -> str:
         score = score_lead(lead_profile, profile_fields)
         lead_profile.score = score
 
-        # FIX 2: save_lead raises sqlite3.IntegrityError on duplicate session_id
-        # (UNIQUE constraint). Wrap it so a retry never crashes the conversation.
         try:
             save_lead(session_id, lead_profile)
         except sqlite3.IntegrityError:
@@ -170,14 +169,9 @@ async def process_message(session_id: str, user_message: str) -> str:
         if score in BOOKING_OFFERED_FOR:
             profile_fields["score"] = score
             update_session(session_id, stage="booking", profile_fields=profile_fields)
-            # FIX 1 (critical): sync the local variable immediately.
-            # Without this, the block below reads the stale value (e.g. "contact"),
-            # calls _get_next_stage(), and overwrites "booking" → "scoring" in the DB.
-            # The bot then loops on "I have everything I need" and never offers slots.
             stage = "booking"
         else:
             update_session(session_id, stage="closed")
-            # FIX 3: cold close must respect the detected language like every other reply.
             cold_close = {
                 "en": "Thanks for your interest! We'll be in touch soon. 👋",
                 "ar": "شكراً لتواصلك معنا! سنعود إليك قريباً. 👋",
@@ -192,29 +186,66 @@ async def process_message(session_id: str, user_message: str) -> str:
             update_session(session_id, stage=next_stage)
             stage = next_stage
 
-    # ─── Handle booking stage ──────────────────────────────────────────
+    # ─── Handle booking stage (with Google Calendar integration) ──────
     if stage == "booking":
-        offered_slots = profile_fields.get("offered_slots")
-        if offered_slots:
-            result = confirm_booking(session_id, user_message, offered_slots)
-            if result["success"]:
-                # ✅ FIX: Immediately close the conversation
+        # 1. Récupérer les créneaux proposés (les générer si absents)
+        available_slots = profile_fields.get("offered_slots")
+        if not available_slots:
+            available_slots = generate_available_slots()
+            profile_fields["offered_slots"] = available_slots
+            update_session(session_id, profile_fields=profile_fields)
+
+        # 2. Vérifier que l'utilisateur a bien fourni un email (contact)
+        lead_email = profile_fields.get("contact", "")
+        if not lead_email:
+            # Demander l'email via le prompt "contact"
+            system_prompt = _build_system_prompt("contact", language)
+            bot_reply = await asyncio.to_thread(
+                call_gemini,
+                system_prompt=system_prompt,
+                user_message=user_message,
+                history=history,
+                temperature=0.3,
+            )
+            history.append({"role": "model", "content": bot_reply})
+            update_session(session_id, history=history)
+            return bot_reply
+
+        # 3. Extraire l'index du créneau choisi par l'utilisateur
+        slot_index = None
+        digits = re.sub(r'\D', '', user_message.strip())
+        if digits:
+            slot_index = int(digits)
+
+        if slot_index is None:
+            # Pas de numéro valide → le prompt système redemandera un choix
+            pass
+        else:
+            # Appeler confirm_booking avec la nouvelle signature
+            result = confirm_booking(
+                slot_index=slot_index,
+                lead_email=lead_email,
+                lead_name=profile_fields.get("name", "Lead"),
+                lead_need=profile_fields.get("need", ""),
+                language=language
+            )
+
+            if result["status"] == "success":
+                # Fermer la conversation
                 update_session(session_id, stage="closed")
                 history.append({"role": "model", "content": result["message"]})
                 update_session(session_id, history=history)
-                # ✅ Return the final message — NO further processing
                 return result["message"]
-            # FIX 7: if the slot was taken out from under them by someone
-            # else (race condition), the offered list is now stale — keep
-            # re-showing it and the user can pick the same dead slot again.
-            # Regenerate a fresh list (which will naturally exclude the
-            # slot that was just booked) before falling through to the
-            # regular prompt below.
-            elif result.get("reason") == "taken":
-                profile_fields["offered_slots"] = generate_available_slots()
-                update_session(session_id, profile_fields=profile_fields)
-            # else: reason == "unparsed" — user didn't pick a valid slot,
-            # continue to regular prompt with the same (still valid) list.
+            else:
+                # Échec (créneau indisponible, erreur technique, etc.)
+                if "disponible" in result["message"].lower() or "available" in result["message"].lower():
+                    # Le créneau a été pris entre-temps → régénérer
+                    profile_fields["offered_slots"] = generate_available_slots()
+                    update_session(session_id, profile_fields=profile_fields)
+                # Afficher le message d'erreur et laisser le prompt système redemander
+                history.append({"role": "model", "content": result["message"]})
+                update_session(session_id, history=history)
+                return result["message"]
 
     # ─── Build system prompt ──────────────────────────────────────────
     system_prompt = _build_system_prompt(stage, language)
@@ -234,9 +265,6 @@ async def process_message(session_id: str, user_message: str) -> str:
             system_prompt += "\n\nNo slots are currently available. Apologize and ask them to try again later."
 
     # ─── Stage-appropriate temperature ───────────────────────────────
-    # Greeting/need: warm and natural. Budget/timeline/contact: friendly
-    # but focused. Booking/closed: near-deterministic — the only correct
-    # output is to present slots or say goodbye, not invent new questions.
     STAGE_TEMPERATURE = {
         "greeting": 0.7,
         "need":     0.5,
@@ -265,17 +293,8 @@ async def process_message(session_id: str, user_message: str) -> str:
 
 # ─── HELPER FUNCTIONS ──────────────────────────────────────────────────
 def _build_system_prompt(stage: str, language: str) -> str:
-    """
-    Build a tightly scoped system prompt for each stage.
-
-    Design principle: every prompt has an explicit FORBIDDEN ACTIONS block.
-    Without it, Gemini fills the gap with everything a skilled human
-    salesperson would do — discovery questions, process clarifications,
-    hypothetical risk questions — none of which belong in a lean qualifier.
-    """
     lang_label = language.upper() if language else "EN"
 
-    # ─── Per-stage task + hard constraints ────────────────────────────
     stage_configs = {
         "greeting": {
             "task": "Greet the user warmly and ask ONE question: what do they need help with?",
@@ -303,12 +322,13 @@ def _build_system_prompt(stage: str, language: str) -> str:
         },
         "booking": {
             "task": (
-                "Present the available time slots to the user and ask them to pick one by number. "
-                "That is the ONLY thing you should do."
+                "Explain that these are time slots for a 15‑minute call with the business owner "
+                "to discuss the project in detail. Then present the available slots and ask "
+                "the user to pick one by number (1, 2, or 3)."
             ),
             "forbidden": (
                 "CRITICAL — do NOT: ask discovery questions, ask about their team or POS system, "
-                "ask about their decision-making process, ask about risks or deadlines, "
+                "ask about their decision‑making process, ask about risks or deadlines, "
                 "pretend to send calendar invites (you cannot), or say anything other than "
                 "presenting the slots and asking for a number."
             ),

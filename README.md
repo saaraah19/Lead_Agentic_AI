@@ -47,11 +47,20 @@ greeting → need → budget → timeline → contact → scoring → booking �
    - Warm → logged to Notion + calendar booking offered, softer framing
    - Cold → polite close, no booking
 
-7. **Booking** — queries the Google Calendar freebusy API in real time to find the next available weekday slots (10am/2pm). When the lead picks one, `calendar_utils.py` creates a 15-minute event with reminders, sends a calendar invite to the lead's email, and saves the confirmation to SQLite as a local audit log. Double-booking is prevented both at the DB layer (UNIQUE constraint on `slot_time`) and by re-checking freebusy before creation.
+7. **Booking** — queries the Google Calendar freebusy API in real time to find the next available weekday slots (10am/2pm). When the lead picks one, `calendar_utils.py` creates a 15-minute event with reminders, and creates the event directly in Google Calendar. The lead receives a confirmation message in the chat with the event details (email invites are omitted because service accounts can't add attendees without domain-wide delegation — a trade-off that keeps the bot fully autonomous and zero-config for Gmail users)., and saves the confirmation to SQLite as a local audit log. Double-booking is prevented both at the DB layer (UNIQUE constraint on `slot_time`) and by re-checking freebusy before creation.
 
 8. **Every lead** (hot, warm, or cold) is logged to Notion as a permanent CRM record.
 
 ---
+
+## Screenshots
+
+![Chat widget booking flow](images/chat-booking.png)
+*The bot qualifies the lead, offers real-time Google Calendar slots, and confirms the booking.*
+
+![Google Calendar event created](images/calendar-event.png)
+*The event appears instantly in the business owner's Google Calendar.*
+
 
 ## Architecture
 

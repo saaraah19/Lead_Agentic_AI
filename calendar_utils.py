@@ -86,11 +86,17 @@ def generate_available_slots(slot_count=6, days_ahead=7):
 
 # calendar_utils.py - fonction create_calendar_event (version corrigée)
 
+# calendar_utils.py - fonction create_calendar_event (version corrigée avec conversion UTC)
+
 def create_calendar_event(slot_iso: str, lead_email: str, lead_name: str = "", lead_need: str = ""):
     """Crée un événement dans Google Calendar (sans lien Meet, sans invité)."""
     service = _get_calendar_service()
     start = datetime.fromisoformat(slot_iso)
     end = start + timedelta(minutes=15)
+
+    # ✅ Conversion en UTC pour éviter les problèmes de fuseau horaire
+    start_utc = start.astimezone(pytz.UTC)
+    end_utc = end.astimezone(pytz.UTC)
 
     summary = f"Discovery call - {lead_name or 'New lead'}"
     if lead_need:
@@ -100,11 +106,11 @@ def create_calendar_event(slot_iso: str, lead_email: str, lead_name: str = "", l
         "summary": summary,
         "description": f"15-minute intro call booked via chatbot.\nLead: {lead_email}\nNeed: {lead_need or 'Not specified'}",
         "start": {
-            "dateTime": start.isoformat(),
-            "timeZone": "Africa/Algiers"
+            "dateTime": start_utc.isoformat(),  # Envoyer en UTC
+            "timeZone": "Africa/Algiers"        # Mais afficher dans ce fuseau
         },
         "end": {
-            "dateTime": end.isoformat(),
+            "dateTime": end_utc.isoformat(),
             "timeZone": "Africa/Algiers"
         },
         "reminders": {
@@ -114,13 +120,12 @@ def create_calendar_event(slot_iso: str, lead_email: str, lead_name: str = "", l
                 {"method": "popup", "minutes": 15},
             ],
         },
-        # Plus de conferenceData
     }
 
     created = service.events().insert(
         calendarId=CALENDAR_ID,
         body=event,
-        sendUpdates="none",  # Pas d'invitations (évite les erreurs)
+        sendUpdates="none",
     ).execute()
 
     return created.get("htmlLink", "")

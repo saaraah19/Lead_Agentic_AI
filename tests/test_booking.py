@@ -1,14 +1,16 @@
 """
 Tests for booking.py — slot parsing and confirmation.
 
-parse_booking_choice in particular is the most failure-prone function in
-the project: it's trying to interpret free-text human input ("2pm",
-"slot 3", "the first one") against a small numbered list, which is
-exactly the kind of thing that silently breaks on inputs nobody tried
-by hand.
+parse_booking_choice is the most failure-prone function in the project:
+it tries to interpret free-text human input ("2pm", "slot 3", "the first
+one") against a small numbered list — exactly the kind of thing that
+silently breaks on inputs nobody tried by hand.
+
+confirm_booking tests use mocks for the Google Calendar layer so the
+suite runs without credentials and stays fast.
 """
+from unittest.mock import patch
 from booking import parse_booking_choice, confirm_booking
-import db
 
 
 SAMPLE_SLOTS = [
@@ -19,6 +21,7 @@ SAMPLE_SLOTS = [
 
 
 # ─── parse_booking_choice ──────────────────────────────────────────────
+
 def test_parses_plain_number():
     assert parse_booking_choice("2", SAMPLE_SLOTS) == "2026-06-23 14:00"
 
@@ -49,35 +52,35 @@ def test_returns_none_for_empty_slot_list():
 
 
 # ─── confirm_booking ────────────────────────────────────────────────────
-def test_confirm_booking_success_saves_to_db():
-    result = confirm_booking("session-1", "2", SAMPLE_SLOTS)
-    assert result["success"] is True
-    assert result["slot"] == "2026-06-23 14:00"
+# All Google Calendar calls are mocked so these tests run without
+# credentials and don't hit the network.
+
+@patch("booking.save_booking_audit")
+@patch("booking.create_calendar_event", return_value="https://calendar.google.com/event/1")
+@patch("booking._slot_is_busy", return_value=False)
+@patch("booking._get_busy_times", return_value=set())
+@patch("booking.generate_available_slots", return_value=SAMPLE_SLOTS)
+def test_confirm_booking_success(mock_slots, mock_busy, mock_is_busy, mock_event, mock_audit):
+    result = confirm_booking(slot_index=2, lead_email="test@example.com", language="en")
+    assert result["status"] == "success"
     assert "02:00 PM" in result["message"]
-
-    booked = db.get_booked_slots()
-    assert "2026-06-23 14:00" in booked
-
-
-def test_confirm_booking_unparsed_input_does_not_touch_db():
-    result = confirm_booking("session-2", "I dunno, surprise me", SAMPLE_SLOTS)
-    assert result["success"] is False
-    assert result["reason"] == "unparsed"
-    assert db.get_booked_slots() == set()
+    assert result["slot"] == "2026-06-23 14:00"
+    mock_event.assert_called_once()
 
 
-def test_confirm_booking_race_condition_reports_taken():
-    # Simulate two leads being offered the same slot: the first booking
-    # succeeds, the second hits the UNIQUE constraint and must report
-    # "taken" instead of silently double-booking or crashing.
-    first = confirm_booking("session-a", "1", SAMPLE_SLOTS)
-    assert first["success"] is True
+@patch("booking.generate_available_slots", return_value=SAMPLE_SLOTS)
+def test_confirm_booking_invalid_index_returns_error(mock_slots):
+    result = confirm_booking(slot_index=99, lead_email="test@example.com", language="en")
+    assert result["status"] == "error"
 
-    second = confirm_booking("session-b", "1", SAMPLE_SLOTS)
-    assert second["success"] is False
-    assert second["reason"] == "taken"
-    assert "someone else" in second["message"].lower()
 
-    # Only one booking should exist for that slot.
-    booked = db.get_booked_slots()
-    assert "2026-06-23 10:00" in booked
+@patch("booking.save_booking_audit")
+@patch("booking.create_calendar_event")
+@patch("booking._slot_is_busy", return_value=True)
+@patch("booking._get_busy_times", return_value={("2026-06-23T09:00:00", "2026-06-23T11:00:00")})
+@patch("booking.generate_available_slots", return_value=SAMPLE_SLOTS)
+def test_confirm_booking_slot_taken_blocks_event_creation(mock_slots, mock_busy, mock_is_busy, mock_event, mock_audit):
+    # If the slot is busy, the calendar event must never be created.
+    result = confirm_booking(slot_index=1, lead_email="test@example.com", language="en")
+    assert result["status"] == "error"
+    mock_event.assert_not_called()

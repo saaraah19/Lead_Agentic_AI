@@ -171,11 +171,14 @@ async def chat(request: Request, body: ChatRequest):
 # ─── ROUTE 3: WIDGET ──────────────────────────────────────────────────
 @app.get("/widget", response_class=HTMLResponse)
 async def widget():
+    html = open("static/widget.html").read()
+    html = html.replace("{{API_BASE}}", os.getenv("API_BASE_URL", ""))
+    return HTMLResponse(html)
     """
     Serve the chat widget HTML from the static folder.
     Shortcut so clients can use /widget instead of /static/widget.html.
     """
-    return FileResponse("static/widget.html")
+    #return FileResponse("static/widget.html")
 
 # ─── ROUTE 4: EXPORT LEADS (with authentication) ──────────────────────
 # WHAT: Export all leads as a CSV file.

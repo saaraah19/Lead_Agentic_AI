@@ -3,14 +3,13 @@ from typing import Set
 from dotenv import load_dotenv
 load_dotenv()
 
-# ─── Gemini ──────────────────────────────────────────────────────────────
 # ─── Gemini ──────────────────────────────────────────────────────────
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 if not GEMINI_API_KEY:
     raise ValueError(
         "GEMINI_API_KEY is not set. Please set it in your .env file or environment."
     )
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-2.5-flash-lite"
 
 # ─── Supported languages ──────────────────────────────────────────────
 SUPPORTED_LANGUAGES = ["en", "ar", "fr"]

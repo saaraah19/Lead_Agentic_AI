@@ -518,7 +518,7 @@
     'use strict';
 
     // ─── CONFIG ────────────────────────────────────────────────────
-    const API_BASE = window.location.origin;
+    const API_BASE = '{{API_BASE}}' || window.location.origin;
     const MAX_STORED_MESSAGES = 50;   // cap how much transcript we keep client-side
 
     // ─── SESSION ID ────────────────────────────────────────────────

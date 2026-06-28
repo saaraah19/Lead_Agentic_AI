@@ -1,4 +1,5 @@
 # booking.py
+import re
 import sqlite3
 from datetime import datetime
 from calendar_utils import generate_available_slots, create_calendar_event, _get_busy_times, _slot_is_busy
@@ -28,6 +29,69 @@ def format_slots_for_prompt(slots: list) -> str:
     if not slots:
         return "Aucun créneau disponible pour le moment."
     return "\n".join(f"{s['index']}. {s['display']}" for s in slots)
+
+
+# ============================================
+# 1.c PARSING DU CHOIX UTILISATEUR
+# ============================================
+def parse_booking_choice(text: str, slots: list) -> str | None:
+    """
+    Parse free-text user input into a slot ISO string.
+    Returns the matching slot's ISO string, or None if unparseable.
+
+    Handles in priority order:
+      1. Ordinal words  — "the first one", "the last slot"
+      2. Time of day    — "2pm", "10am", "14h"
+      3. Slot number    — "2", "slot 3", "I'll take the 3rd"
+      4. Day name       — "wednesday", "mercredi", "tue"
+    """
+    if not slots or not text:
+        return None
+
+    text_lower = text.lower().strip()
+
+    # 1. Ordinal keywords (checked before digits to avoid "1st" → index 1 accidentally)
+    if any(w in text_lower for w in ["first", "premier", "1st", "الأول"]):
+        return slots[0]["slot"]
+    if any(w in text_lower for w in ["last", "dernier", "الأخير"]):
+        return slots[-1]["slot"]
+
+    # 2. Time of day: "2pm", "10 am", "14h"
+    time_match = re.search(r'\b(\d{1,2})\s*(am|pm|h)\b', text_lower)
+    if time_match:
+        hour = int(time_match.group(1))
+        meridiem = time_match.group(2)
+        if meridiem == "pm" and hour != 12:
+            hour += 12
+        elif meridiem == "am" and hour == 12:
+            hour = 0
+        for slot in slots:
+            if datetime.fromisoformat(slot["slot"]).hour == hour:
+                return slot["slot"]
+
+    # 3. Slot index number
+    digit_match = re.search(r'\b(\d+)\b', text_lower)
+    if digit_match:
+        idx = int(digit_match.group(1))
+        for slot in slots:
+            if slot["index"] == idx:
+                return slot["slot"]
+
+    # 4. Day names (English + French)
+    day_map = {
+        "monday": 0, "mon": 0, "lundi": 0,
+        "tuesday": 1, "tue": 1, "mardi": 1,
+        "wednesday": 2, "wed": 2, "mercredi": 2,
+        "thursday": 3, "thu": 3, "jeudi": 3,
+        "friday": 4, "fri": 4, "vendredi": 4,
+    }
+    for word, weekday in day_map.items():
+        if word in text_lower:
+            for slot in slots:
+                if datetime.fromisoformat(slot["slot"]).weekday() == weekday:
+                    return slot["slot"]
+
+    return None
 
 
 # ============================================

@@ -16,6 +16,18 @@ google-genai==2.8.0        # was 1.2.0 — the SDK has moved a lot since
                             # for a newer patch before you deploy if
                             # it's been a while since this was pinned.
 
+# ─── Google Calendar ──────────────────────────────────────────────
+# WHAT: Required by calendar_utils.py for real-time slot availability
+#       and automatic event creation in Google Calendar.
+# WHY:  google-api-python-client provides the Calendar REST client
+#       (googleapiclient.discovery.build). google-auth provides the
+#       service-account credentials layer. pytz handles timezone-aware
+#       datetimes for Africa/Algiers so slots aren't offset by the
+#       server's own timezone.
+google-api-python-client==2.127.0
+google-auth==2.29.0
+pytz==2024.1
+
 # ─── HTTP Client ──────────────────────────────────────────────────
 httpx==0.28.1               # unchanged — still current as of Jun 2026
 

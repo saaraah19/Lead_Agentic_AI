@@ -55,12 +55,25 @@ greeting → need → budget → timeline → contact → scoring → booking �
 
 ## Screenshots
 
-![Chat widget booking flow](images/chat-booking.png)
-*The bot qualifies the lead, offers real-time Google Calendar slots, and confirms the booking.*
+### 1. Full conversation flow
+![Full conversation](images/lead-agent-convo-1.png)
+*The bot detects English, qualifies the lead (need → budget → timeline → contact), and presents available slots.*
 
-![Google Calendar event created](images/calendar-event.png)
-*The event appears instantly in the business owner's Google Calendar.*
+### 2. Natural language booking
+![Natural language booking](images/lead-agent-convo-3.png)
+*The lead says "the 4th option the thursday at 10 would be great" — the bot understands and books the slot.*
 
+### 3. Google Calendar event created
+![Google Calendar event](images/google-calendar-booked-slot.png)
+*The event appears at exactly 10:00 AM in the business owner's calendar, with the lead's email and project details.*
+
+### 4. Slack hot lead alert
+![Slack alert](images/slack-alerts.png)
+*Hot leads trigger an instant Slack notification with the full lead profile.*
+
+### 5. Notion CRM table
+![Notion leads](images/notion-leads-table.png)
+*Every lead is logged to Notion with score (HOT/WARM/COLD), need, budget, timeline, and contact.*
 
 ## Architecture
 

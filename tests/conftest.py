@@ -4,13 +4,13 @@ Shared pytest fixtures.
 import sys
 import os
 from pathlib import Path
+import pytest 
 
 # Ajouter la racine du projet au PYTHONPATH
-# Cela permet d'importer les modules comme db, agent, etc.
 root = Path(__file__).parent.parent
 sys.path.insert(0, str(root))
 
-# Définir une clé API fictive pour les tests (car config.py l'exige)
+# Définir des variables d'environnement fictives pour les tests
 os.environ.setdefault("GEMINI_API_KEY", "test-key-not-used-in-tests")
 os.environ.setdefault("GOOGLE_CREDENTIALS_JSON", '{"type":"service_account","project_id":"test"}')
 os.environ.setdefault("GOOGLE_CALENDAR_ID", "test@calendar.com")

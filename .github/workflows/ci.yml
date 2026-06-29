@@ -29,4 +29,6 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run tests
-        run: pytest tests/test_scorer.py tests/test_agent_stages.py -v --tb=short
+        # test_booking.py is back: create_calendar_event and _get_busy_times
+        # are now properly mocked, so no live credentials are needed.
+        run: pytest tests/test_scorer.py tests/test_agent_stages.py tests/test_booking.py -v --tb=short

@@ -3,6 +3,8 @@ import re
 import sqlite3
 from datetime import datetime
 from calendar_utils import generate_available_slots, create_calendar_event, _get_busy_times, _slot_is_busy
+import db  # leads.db — used for the UNIQUE race-condition guard on bookings.slot_time
+
 
 # ============================================
 # 1. FONCTION PUBLIQUE POUR RÉCUPÉRER LES CRÉNEAUX
@@ -95,23 +97,37 @@ def parse_booking_choice(text: str, slots: list) -> str | None:
 
 
 # ============================================
-# 2. CONFIRMATION DE RÉSERVATION (NOUVELLE VERSION)
+# 2. CONFIRMATION DE RÉSERVATION
 # ============================================
-def confirm_booking(slot_index: int, lead_email: str, lead_name: str = "", lead_need: str = "", language: str = "fr"):
+def confirm_booking(
+    slot_index: int,
+    lead_email: str,
+    lead_name: str = "",
+    lead_need: str = "",
+    language: str = "fr",
+    session_id: str = "",
+):
     """
     Confirme la réservation :
-    1. Vérifie une dernière fois que le créneau est libre
-    2. Crée l'événement dans Google Calendar
-    3. Sauvegarde dans SQLite pour audit
-    4. Retourne le message de confirmation localisé
+    1. Trouve le créneau sélectionné
+    2. Vérifie une dernière fois que le créneau est libre (freebusy)
+    3. Réclame le créneau dans la DB AVANT l'appel calendrier
+       (garde atomique contre les doubles réservations concurrentes)
+    4. Crée l'événement dans Google Calendar
+       Si ça échoue : annule la réservation DB pour que le créneau soit retentable
+    5. Sauvegarde dans SQLite local pour audit
+    6. Retourne le message de confirmation localisé
+
+    POURQUOI DB AVANT CALENDRIER :
+        Deux requêtes simultanées peuvent toutes les deux passer le check
+        freebusy si elles arrivent dans le même intervalle. La contrainte
+        UNIQUE sur bookings.slot_time garantit qu'une seule réussira l'INSERT.
+        La deuxième reçoit un message "créneau pris" avant même de toucher
+        l'API Google Calendar.
     """
-    # Récupérer les créneaux actuels (pour avoir le détail du slot sélectionné)
+    # ─── Récupérer les créneaux actuels ─────────────────────────────
     available = generate_available_slots()
-    selected = None
-    for slot in available:
-        if slot["index"] == slot_index:
-            selected = slot
-            break
+    selected = next((s for s in available if s["index"] == slot_index), None)
 
     if not selected:
         return {
@@ -119,7 +135,7 @@ def confirm_booking(slot_index: int, lead_email: str, lead_name: str = "", lead_
             "message": get_message("slot_unavailable", language)
         }
 
-    # Vérification de conflit juste avant la création (sécurité)
+    # ─── Vérification freebusy (Google Calendar) ────────────────────
     slot_dt = datetime.fromisoformat(selected["slot"])
     busy_times = _get_busy_times()
 
@@ -129,7 +145,19 @@ def confirm_booking(slot_index: int, lead_email: str, lead_name: str = "", lead_
             "message": get_message("slot_taken", language)
         }
 
-    # 1. Créer l'événement Google Calendar
+    # ─── Garde DB atomique (AVANT l'appel calendrier) ───────────────
+    # WHAT: INSERT avec contrainte UNIQUE sur slot_time.
+    # WHY: Si deux requêtes passent le check freebusy simultanément,
+    #      une seule réussira cet INSERT. L'autre reçoit False et
+    #      retourne une erreur propre sans créer d'événement dupliqué.
+    slot_claimed = db.save_booking(session_id or lead_email, selected["slot"])
+    if not slot_claimed:
+        return {
+            "status": "error",
+            "message": get_message("slot_taken", language)
+        }
+
+    # ─── Créer l'événement Google Calendar ──────────────────────────
     try:
         event_url = create_calendar_event(
             slot_iso=selected["slot"],
@@ -138,19 +166,32 @@ def confirm_booking(slot_index: int, lead_email: str, lead_name: str = "", lead_
             lead_need=lead_need
         )
     except Exception as e:
+        # Annuler la réservation DB pour que le créneau soit retentable.
+        # Si le rollback échoue lui aussi, le créneau reste bloqué en DB
+        # mais le check freebusy (Google) laissera passer les prochaines
+        # tentatives — Google Calendar est la source de vérité pour la dispo.
         print(f"❌ Erreur lors de la création de l'événement : {e}")
+        try:
+            with db.get_db() as conn:
+                conn.execute(
+                    "DELETE FROM bookings WHERE slot_time = ?",
+                    (selected["slot"],)
+                )
+                conn.commit()
+        except Exception as rollback_err:
+            print(f"⚠️ Rollback DB échoué : {rollback_err}")
         return {
             "status": "error",
             "message": get_message("calendar_error", language)
         }
 
-    # 2. Sauvegarde dans SQLite (audit log)
+    # ─── Sauvegarde audit local (non critique) ──────────────────────
     try:
         save_booking_audit(selected["slot"], lead_email, lead_name, lead_need)
     except Exception as e:
-        print(f"⚠️ Erreur d'écriture SQLite (non critique) : {e}")
+        print(f"⚠️ Erreur d'écriture audit (non critique) : {e}")
 
-    # 3. Message de confirmation localisé
+    # ─── Message de confirmation localisé ───────────────────────────
     display_time = selected["display"]
     message = get_message("booking_confirmed", language).format(time=display_time)
 
@@ -192,11 +233,12 @@ def get_message(key: str, language: str = "fr") -> str:
 
 
 # ============================================
-# 4. SAUVEGARDE SQLITE (AUDIT LOG)
+# 4. SAUVEGARDE SQLITE LOCALE (AUDIT LOG)
 # ============================================
 def save_booking_audit(slot_iso: str, email: str, name: str, need: str):
     """
-    Conserve une trace locale de la réservation.
+    Conserve une trace locale de la réservation dans bookings.db.
+    Séparé de db.save_booking() (leads.db) qui sert de garde de course.
     """
     conn = sqlite3.connect("bookings.db")
     cursor = conn.cursor()

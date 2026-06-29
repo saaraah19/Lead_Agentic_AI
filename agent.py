@@ -9,10 +9,16 @@ from datetime import datetime
 from db import get_session, create_session, update_session, save_lead
 from generator import call_gemini, extract_lead_profile
 from model import LeadProfile
-from config import CRITICAL_FIELDS, STAGES, BOOKING_OFFERED_FOR, BOOKING_PHRASE
+from config import (
+    CRITICAL_FIELDS, STAGES, BOOKING_OFFERED_FOR,
+    BOOKING_PHRASE, STAGE_TEMPERATURE,
+)
 from scorer import score_lead
 from notifier import send_slack_alert, log_to_notion
-from booking import generate_available_slots, format_slots_for_prompt, confirm_booking
+from booking import (
+    generate_available_slots, format_slots_for_prompt,
+    confirm_booking, parse_booking_choice,
+)
 
 # ─── Logging ──────────────────────────────────────────────────────────
 logger = logging.getLogger(__name__)
@@ -37,7 +43,7 @@ def _fallback_extract(text: str) -> dict:
         (r'\$?([\d,]+)\s*(k|K|thousand|grand|grands)', True),
         (r'\$([\d,]+)', False),
         (r'(\d+)\s*(k|K|thousand|grand|grands)', True),
-        (r'(\d+)', False),  # Capture les nombres seuls (5000, 2000, etc.)
+        (r'(\d+)', False),
     ]
     for pattern, has_multiplier in budget_patterns:
         match = re.search(pattern, text, re.IGNORECASE)
@@ -84,99 +90,6 @@ def _fallback_extract(text: str) -> dict:
 
     return result
 
-# ─── PARSE SLOT CHOICE FROM NATURAL LANGUAGE (FR/EN/AR) ──────────────
-def _parse_slot_choice(user_message: str, available_slots: list) -> int:
-    """
-    Tente d'extraire un index de créneau à partir du message utilisateur.
-    Supporte le français, l'anglais et l'arabe.
-    Retourne l'index (1-based) ou None si non reconnu.
-    """
-    if not available_slots:
-        return None
-
-    msg = user_message.lower().strip()
-
-    # Convertir les chiffres arabes (١,٢,٣...) en chiffres occidentaux (1,2,3...)
-    arabic_to_western = {
-        '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4',
-        '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9'
-    }
-    normalized_msg = ''.join(arabic_to_western.get(c, c) for c in msg)
-
-    # Mapper les jours de la semaine (FR/EN/AR)
-    day_map = {
-        # --- Anglais / Français ---
-        "lun": 0, "monday": 0, "mon": 0,
-        "mar": 1, "tuesday": 1, "tue": 1,
-        "mer": 2, "wednesday": 2, "wed": 2,
-        "jeu": 3, "thursday": 3, "thu": 3,
-        "ven": 4, "friday": 4, "fri": 4,
-        "sam": 5, "saturday": 5, "sat": 5,
-        "dim": 6, "sunday": 6, "sun": 6,
-        # --- Arabe ---
-        "الاحد": 6, "احد": 6,
-        "الاثنين": 0, "اثنين": 0,
-        "الثلاثاء": 1, "ثلاثاء": 1,
-        "الاربعاء": 2, "اربعاء": 2,
-        "الخميس": 3, "خميس": 3,
-        "الجمعة": 4, "جمعة": 4,
-        "السبت": 5, "سبت": 5,
-    }
-
-    # Rechercher un numéro explicite (1, 2, 3...)
-    digits = re.sub(r'\D', '', normalized_msg)
-    if digits:
-        idx = int(digits)
-        if 1 <= idx <= len(available_slots):
-            return idx
-
-    # Extraire le jour mentionné
-    mentioned_day = None
-    for day_key, day_num in day_map.items():
-        if day_key in normalized_msg:
-            mentioned_day = day_num
-            break
-
-    # Extraire l'heure mentionnée
-    hour = None
-    is_pm = None
-
-    if "pm" in normalized_msg or "مساء" in normalized_msg:
-        is_pm = True
-    elif "am" in normalized_msg or "صباح" in normalized_msg:
-        is_pm = False
-
-    time_match = re.search(r'(\d{1,2})\s*(?:h|:|\.)?\s*(\d{2})?', normalized_msg)
-    if time_match:
-        hour = int(time_match.group(1))
-        if is_pm is True and hour < 12:
-            hour += 12
-        elif is_pm is False and hour == 12:
-            hour = 0
-
-    # Si jour + heure → chercher le slot correspondant
-    if mentioned_day is not None and hour is not None:
-        for slot in available_slots:
-            slot_dt = datetime.fromisoformat(slot["slot"])
-            slot_weekday = slot_dt.weekday()
-            slot_hour = slot_dt.hour
-            if slot_weekday == mentioned_day and slot_hour == hour:
-                return slot["index"]
-
-    # Si juste un jour → prendre le 1er slot de ce jour
-    if mentioned_day is not None:
-        for slot in available_slots:
-            slot_dt = datetime.fromisoformat(slot["slot"])
-            if slot_dt.weekday() == mentioned_day:
-                return slot["index"]
-
-    # Mots-clés : "premier", "dernier" (FR/EN/AR)
-    if any(keyword in normalized_msg for keyword in ["premier", "first", "الاول"]):
-        return available_slots[0]["index"]
-    if any(keyword in normalized_msg for keyword in ["dernier", "last", "الاخير", "الأخير"]):
-        return available_slots[-1]["index"]
-
-    return None
 
 # ─── MAIN ENTRY POINT ──────────────────────────────────────────────────
 async def process_message(session_id: str, user_message: str) -> str:
@@ -207,15 +120,15 @@ async def process_message(session_id: str, user_message: str) -> str:
     history.append({"role": "user", "content": user_message})
 
     # ─── Gemini extraction (best effort) ──────────────────────────────
+    # _ discards the intermediate LeadProfile returned by _update_lead_profile;
+    # we rebuild it from the merged profile_fields a few lines below.
     if stage not in ("scoring", "booking", "closed"):
         try:
-            extracted, profile_fields = await _update_lead_profile(
+            _, profile_fields = await _update_lead_profile(
                 session_id, history, language, profile_fields
             )
         except Exception as e:
             logger.warning(f"Gemini extraction failed: {e}")
-    else:
-        extracted = None
 
     # ─── Always apply fallback for any missing fields ──────────────────
     fallback = _fallback_extract(user_message)
@@ -264,7 +177,6 @@ async def process_message(session_id: str, user_message: str) -> str:
 
         if score in BOOKING_OFFERED_FOR:
             profile_fields["score"] = score
-            # Réinitialiser le flag de présentation des créneaux à chaque nouvelle session de booking
             profile_fields["slots_presented"] = False
             update_session(session_id, stage="booking", profile_fields=profile_fields)
             stage = "booking"
@@ -284,21 +196,19 @@ async def process_message(session_id: str, user_message: str) -> str:
             update_session(session_id, stage=next_stage)
             stage = next_stage
 
-    # ─── Handle booking stage (with Google Calendar integration) ──────
+    # ─── Handle booking stage ─────────────────────────────────────────
     if stage == "booking":
         # 1. Récupérer les créneaux proposés (les générer si absents)
         available_slots = profile_fields.get("offered_slots")
         if not available_slots:
             available_slots = generate_available_slots()
             profile_fields["offered_slots"] = available_slots
-            # Réinitialiser le flag car on vient de générer de nouveaux créneaux
             profile_fields["slots_presented"] = False
             update_session(session_id, profile_fields=profile_fields)
 
         # 2. Vérifier que l'utilisateur a bien fourni un email (contact)
         lead_email = profile_fields.get("contact", "")
         if not lead_email:
-            # Demander l'email via le prompt "contact"
             system_prompt = _build_system_prompt("contact", language)
             bot_reply = await asyncio.to_thread(
                 call_gemini,
@@ -314,9 +224,15 @@ async def process_message(session_id: str, user_message: str) -> str:
         # 3. Vérifier si les créneaux ont déjà été présentés
         slots_presented = profile_fields.get("slots_presented", False)
 
-        # 4. Si les créneaux ont déjà été présentés, on essaie de parser le choix
+        # 4. Créneaux déjà présentés → parser le choix de l'utilisateur
         if slots_presented:
-            slot_index = _parse_slot_choice(user_message, available_slots)
+            # Use the tested parse_booking_choice from booking.py (returns ISO string),
+            # then resolve to the index that confirm_booking expects.
+            slot_iso = parse_booking_choice(user_message, available_slots)
+            slot_index = (
+                next((s["index"] for s in available_slots if s["slot"] == slot_iso), None)
+                if slot_iso else None
+            )
 
             if slot_index is None:
                 fallback_message = {
@@ -329,13 +245,14 @@ async def process_message(session_id: str, user_message: str) -> str:
                 update_session(session_id, history=history)
                 return bot_reply
 
-            # Si un choix valide a été fait
+            # Choix valide — confirmer la réservation
             result = confirm_booking(
                 slot_index=slot_index,
                 lead_email=lead_email,
                 lead_name=profile_fields.get("name", "Lead"),
                 lead_need=profile_fields.get("need", ""),
-                language=language
+                language=language,
+                session_id=session_id,   # passed through for the DB race guard
             )
 
             if result["status"] == "success":
@@ -345,7 +262,7 @@ async def process_message(session_id: str, user_message: str) -> str:
                 return result["message"]
             else:
                 if "disponible" in result["message"].lower() or "available" in result["message"].lower():
-                    # Le créneau a été pris → régénérer et remettre le flag à False
+                    # Créneau pris → régénérer les créneaux et remettre le flag à False
                     profile_fields["offered_slots"] = generate_available_slots()
                     profile_fields["slots_presented"] = False
                     update_session(session_id, profile_fields=profile_fields)
@@ -353,68 +270,36 @@ async def process_message(session_id: str, user_message: str) -> str:
                 update_session(session_id, history=history)
                 return result["message"]
 
-        # 5. Si les créneaux n'ont PAS encore été présentés, on les affiche directement
-        if not slots_presented:
-            # Traductions multilingues pour la présentation
-            translations = {
-                "en": {
-                    "intro": "I have a few time slots available for a 15-minute call to discuss your project in detail.",
-                    "ask": "Please pick a slot by number (1, 2, 3, ...) or say the day and time (e.g., 'Thursday 10am')."
-                },
-                "fr": {
-                    "intro": "J'ai quelques créneaux disponibles pour un appel de 15 minutes afin de discuter de votre projet en détail.",
-                    "ask": "Veuillez choisir un créneau par numéro (1, 2, 3, ...) ou indiquer le jour et l'heure (ex: 'jeudi 10h')."
-                },
-                "ar": {
-                    "intro": "لدي بعض المواعيد المتاحة لمكالمة مدتها 15 دقيقة لمناقشة مشروعك بالتفصيل.",
-                    "ask": "الرجاء اختيار موعد برقم (1، 2، 3، ...) أو ذكر اليوم والوقت (مثال: 'الخميس 10 صباحاً')."
-                }
+        # 5. Créneaux pas encore présentés → les afficher
+        translations = {
+            "en": {
+                "intro": "I have a few time slots available for a 15-minute call to discuss your project in detail.",
+                "ask": "Please pick a slot by number (1, 2, 3, ...) or say the day and time (e.g., 'Thursday 10am')."
+            },
+            "fr": {
+                "intro": "J'ai quelques créneaux disponibles pour un appel de 15 minutes afin de discuter de votre projet en détail.",
+                "ask": "Veuillez choisir un créneau par numéro (1, 2, 3, ...) ou indiquer le jour et l'heure (ex: 'jeudi 10h')."
+            },
+            "ar": {
+                "intro": "لدي بعض المواعيد المتاحة لمكالمة مدتها 15 دقيقة لمناقشة مشروعك بالتفصيل.",
+                "ask": "الرجاء اختيار موعد برقم (1، 2، 3، ...) أو ذكر اليوم والوقت (مثال: 'الخميس 10 صباحاً')."
             }
-            t = translations.get(language, translations["en"])
-            slot_text = format_slots_for_prompt(available_slots)
-            bot_reply = f"{t['intro']}\n\n{slot_text}\n\n{t['ask']}"
+        }
+        t = translations.get(language, translations["en"])
+        slot_text = format_slots_for_prompt(available_slots)
+        bot_reply = f"{t['intro']}\n\n{slot_text}\n\n{t['ask']}"
 
-            # Marquer que les créneaux ont été présentés
-            profile_fields["slots_presented"] = True
-            update_session(session_id, profile_fields=profile_fields)
+        profile_fields["slots_presented"] = True
+        update_session(session_id, profile_fields=profile_fields)
 
-            history.append({"role": "model", "content": bot_reply})
-            update_session(session_id, history=history)
-            return bot_reply
+        history.append({"role": "model", "content": bot_reply})
+        update_session(session_id, history=history)
+        return bot_reply
 
     # ─── Build system prompt ──────────────────────────────────────────
     system_prompt = _build_system_prompt(stage, language)
 
-    # ─── If booking, inject slots (cette section ne sera plus atteinte car on revoit plus haut,
-    #     mais on la garde pour les rares cas où le flux passerait autrement) ──
-    if stage == "booking":
-        available_slots = profile_fields.get("offered_slots")
-        if not available_slots:
-            available_slots = generate_available_slots()
-            profile_fields["offered_slots"] = available_slots
-            profile_fields["slots_presented"] = False
-            update_session(session_id, profile_fields=profile_fields)
-        if available_slots:
-            phrase = BOOKING_PHRASE.get(profile_fields.get("score"), "we can set up a quick call")
-            slot_text = format_slots_for_prompt(available_slots)
-            system_prompt += f"\n\n{phrase} — here are the available slots:\n{slot_text}\nAsk the lead to pick a slot by number (e.g., '1', '2', or '3')."
-            # Marquer que les créneaux ont été présentés
-            profile_fields["slots_presented"] = True
-            update_session(session_id, profile_fields=profile_fields)
-        else:
-            system_prompt += "\n\nNo slots are currently available. Apologize and ask them to try again later."
-
-    # ─── Stage-appropriate temperature ───────────────────────────────
-    STAGE_TEMPERATURE = {
-        "greeting": 0.7,
-        "need":     0.5,
-        "budget":   0.3,
-        "timeline": 0.3,
-        "contact":  0.3,
-        "scoring":  0.0,
-        "booking":  0.1,
-        "closed":   0.0,
-    }
+    # ─── Stage-appropriate temperature (from config) ──────────────────
     temperature = STAGE_TEMPERATURE.get(stage, 0.5)
 
     # ─── Call Gemini ──────────────────────────────────────────────────
@@ -430,6 +315,7 @@ async def process_message(session_id: str, user_message: str) -> str:
     update_session(session_id, history=history)
 
     return bot_reply
+
 
 # ─── HELPER FUNCTIONS ──────────────────────────────────────────────────
 def _build_system_prompt(stage: str, language: str) -> str:
@@ -499,6 +385,7 @@ FORBIDDEN: {config["forbidden"]}"""
 
     return prompt.strip()
 
+
 def _is_complete(lead_profile: LeadProfile) -> bool:
     fields = {
         "language": lead_profile.language,
@@ -512,6 +399,7 @@ def _is_complete(lead_profile: LeadProfile) -> bool:
         if not value or value.strip() == "":
             return False
     return True
+
 
 def _get_next_stage(current_stage: str, lead_profile: LeadProfile) -> str:
     stage_to_field = {
@@ -537,6 +425,7 @@ def _get_next_stage(current_stage: str, lead_profile: LeadProfile) -> str:
             except ValueError:
                 pass
     return current_stage
+
 
 # ─── LEAD PROFILE EXTRACTION ──────────────────────────────────────────
 async def _update_lead_profile(

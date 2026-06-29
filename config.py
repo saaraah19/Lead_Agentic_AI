@@ -1,5 +1,5 @@
 import os
-from typing import Set
+from typing import Dict, Set
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -30,10 +30,27 @@ SCORE_LABELS = ["hot", "warm", "cold"]   # was SCORE = ["Hot"," Warm","Cold"]
 # ─── Booking config (upgraded from your bool) ────────────────────────
 BOOKING_OFFERED_FOR: Set[str] = {"hot", "warm"}  # which scores get a booking option
 BOOKING_PHRASE = {
-    "hot": "let's grab time now",                      # pushed
+    "hot": "let's grab time now",                          # pushed
     "warm": "if you'd like, we can set up a quick call",  # offered
 }
 BOOKING_SLOT_COUNT = 3
+
+# ─── Gemini temperature per stage ────────────────────────────────────
+# WHAT: How creative/random Gemini should be at each stage.
+# WHY: Greeting can be warm and varied (0.7); extracting contact info
+#      or confirming a booking must be precise and consistent (0.0–0.1).
+#      Kept here alongside the other stage config so changes to the
+#      stage list and temperature policy stay in one place.
+STAGE_TEMPERATURE: Dict[str, float] = {
+    "greeting": 0.7,
+    "need":     0.5,
+    "budget":   0.3,
+    "timeline": 0.3,
+    "contact":  0.3,
+    "scoring":  0.0,
+    "booking":  0.1,
+    "closed":   0.0,
+}
 
 # ─── History cap ──────────────────────────────────────────────────────
 # WHAT: Max number of past turns sent to Gemini on each call.

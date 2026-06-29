@@ -7,7 +7,7 @@
 ![CI](https://img.shields.io/github/actions/workflow/status/YOUR_USERNAME/lead-agent-ai/ci.yml?label=CI)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-> **[→ Live demo](https://your-app.onrender.com/widget)** · **[→ API docs](https://your-app.onrender.com/docs)**
+> **[→ Live demo](https://lead-agent-ai.onrender.com/)** · **[→ API docs](https://lead-agent-ai.onrender.com/docs)**
 
 An AI chatbot that qualifies inbound sales leads in **English, French, and Arabic**, scores them as hot/warm/cold, and books a discovery call directly into Google Calendar — deployed as a chat widget that drops into any small-business website.
 
